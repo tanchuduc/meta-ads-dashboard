@@ -6,16 +6,32 @@ var ACCESS_TOKEN = 'EAAOhgsUSolIBS6ke3vNsxPjH2K4peyf4Mm2THErTUcRQxCw6pJhQl5mGQy3
 
 // Danh sách 9 tài khoản quảng cáo được phân quyền từ System User
 var AD_ACCOUNTS = [
-  { id: 'act_988452388193871',  name: 'Alpha 1 GMT +7 20tr - Hoa' },
-  { id: 'act_3863604326993604', name: 'TKQC Alpha 2 GMT-7- Hoa' },
-  { id: 'act_140020454941995',  name: 'Alpha 5 GMT -7 - Tấn' },
-  { id: 'act_856434001679007',  name: 'Alpha 3 GMT-3 MKT AB - Thảo' },
-  { id: 'act_1855997818105694', name: 'Alpha 6 - GMT -3 - Tấn' },
-  { id: 'act_542081774682636',  name: 'Alpha 7 - GMT-3 - HTXB - Phương' },
-  { id: 'act_848982799482573',  name: 'Alpha 8 - GMT-4 (11h) - MKT Sống' },
-  { id: 'act_2929843193813956', name: 'TKQC MED - Alpha 10 GMT +7 (0h)' },
-  { id: 'act_1845118092714419', name: 'TK 1 - MKT Alpha - Thảo' }
+  { id: 'act_988452388193871',  name: 'Alpha 1 GMT +7 20tr - Hoa',        shortName: 'Alpha 1 (Hoa)',    color: '#0064E0' },
+  { id: 'act_3863604326993604', name: 'TKQC Alpha 2 GMT-7- Hoa',          shortName: 'Alpha 2 (Hoa)',    color: '#0866FF' },
+  { id: 'act_140020454941995',  name: 'Alpha 5 GMT -7 - Tấn',             shortName: 'Alpha 5 (Tấn)',    color: '#10B981' },
+  { id: 'act_856434001679007',  name: 'Alpha 3 GMT-3 MKT AB - Thảo',      shortName: 'Alpha 3 (Thảo)',   color: '#8B5CF6' },
+  { id: 'act_1855997818105694', name: 'Alpha 6 - GMT -3 - Tấn',           shortName: 'Alpha 6 (Tấn)',    color: '#059669' },
+  { id: 'act_542081774682636',  name: 'Alpha 7 - GMT-3 - HTXB - Phương',   shortName: 'Alpha 7 (Phương)', color: '#F59E0B' },
+  { id: 'act_848982799482573',  name: 'Alpha 8 - GMT-4 (11h) - MKT Sống',  shortName: 'Alpha 8 (Sống)',   color: '#EC4899' },
+  { id: 'act_2929843193813956', name: 'TKQC MED - Alpha 10 GMT +7 (0h)',   shortName: 'Alpha 10 (MED)',   color: '#06B6D4' },
+  { id: 'act_1845118092714419', name: 'TK 1 - MKT Alpha - Thảo',          shortName: 'TK 1 (Thảo)',      color: '#6366F1' }
 ];
+
+// Google OAuth 2.0 Client ID (Web application) dùng cho đăng nhập Google Sign-In.
+// Hướng dẫn thiết lập:
+//   1. Mở Google Cloud Console (https://console.cloud.google.com/apis/credentials)
+//   2. Tạo OAuth 2.0 Client ID loại "Web application", thêm Authorized JavaScript origins
+//      là domain Google Apps Script web app (https://script.google.com và https://*.googleusercontent.com)
+//   3. Dán Client ID vào biến bên dưới HOẶC lưu vào Script Properties với key 'GOOGLE_OAUTH_CLIENT_ID'.
+var GOOGLE_OAUTH_CLIENT_ID = '';
+
+function getGoogleOAuthClientId_() {
+  var prop = '';
+  try {
+    prop = PropertiesService.getScriptProperties().getProperty('GOOGLE_OAUTH_CLIENT_ID') || '';
+  } catch (e) {}
+  return String(prop || GOOGLE_OAUTH_CLIENT_ID || '').trim();
+}
 
 // ID thư mục Google Drive của bạn
 var DRIVE_FOLDER_ID = '1WjwUW-4iyNrLLZHfDF9fpooqHrZkSCJg';
@@ -111,6 +127,7 @@ function fetchCampaignSettings(accountId) {
  * Chạy 3 tầng chính, thời gian thực thi ~2-3 phút, an toàn 100% không lo chạm ngưỡng 6 phút của Apps Script.
  */
 function syncDataCore() {
+  var t0 = Date.now();
   Logger.log('1/3: Đang đồng bộ Campaign...');
   if (typeof importDataFromJSON === 'function') importDataFromJSON();
 
@@ -118,7 +135,8 @@ function syncDataCore() {
   if (typeof importAdSetData === 'function') importAdSetData();
 
   Logger.log('3/3: Đang đồng bộ Ad...');
-  if (typeof importAdData === 'function') importAdData();
+  if (typeof importAdDataWithBudget_ === 'function') importAdDataWithBudget_(t0 + 290000);
+  else if (typeof importAdData === 'function') importAdData();
 
   Logger.log('===> HOÀN TẤT ĐỒNG BỘ DỮ LIỆU CỐT LÕI (Campaign, Ad Set, Ad)!');
 }
@@ -138,7 +156,8 @@ function syncTatCaDuLieu() {
   if (typeof importAdSetData === 'function') importAdSetData();
 
   Logger.log('3/5: Đang đồng bộ Ad...');
-  if (typeof importAdData === 'function') importAdData();
+  if (typeof importAdDataWithBudget_ === 'function') importAdDataWithBudget_(t0 + 290000);
+  else if (typeof importAdData === 'function') importAdData();
 
   var elapsed = Date.now() - t0;
   if (elapsed > MAX_SAFE_MS) {

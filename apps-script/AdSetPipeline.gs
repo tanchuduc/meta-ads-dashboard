@@ -332,6 +332,20 @@ function isAccountRateLimited_(err) {
   return err.code === 80004 || err.code === 613;
 }
 
+// Identifies Meta Insights errors caused by oversized/overloaded queries (e.g.
+// code 1 / subcode 99 "An unknown error occurred" after ~60s, or code 2 "Please
+// reduce the amount of data") where shrinking `limit` or splitting the date range
+// fixes the request, whereas retrying identical parameters just wastes time.
+function isQueryOverloadMetaError_(err) {
+  if (!err) return false;
+  if (err.code === 1 && err.error_subcode === 99) return true;
+  if (err.code === 2) return true;
+  var msg = String(err.message || '').toLowerCase();
+  return msg.indexOf('reduce the amount of data') !== -1 ||
+         msg.indexOf('too much data') !== -1 ||
+         (err.code === 1 && msg.indexOf('unknown error') !== -1);
+}
+
 // FIXED (Aug 2026): the old version below threw away Meta's ACTUAL error text on every
 // retryable failure and replaced it with a synthetic "Transient Meta API error (code X)"
 // message instead. That's exactly why a genuinely broken, non-retryable request (a
@@ -342,10 +356,16 @@ function isAccountRateLimited_(err) {
 // error_user_msg, fbtrace_id, whatever's actually there — is preserved all the way back
 // to the caller instead of being masked. This doesn't change WHEN something retries
 // (still governed by isTransientMetaError_ below), only what you can see once it stops.
-function fetchWithRetry_(url, maxRetries) {
+function fetchWithRetry_(url, maxRetries, options) {
   maxRetries = maxRetries || 5;
+  options = options || {};
   var wait = 2000; // start with 2 seconds
+  var lastErr = null;
   for (var attempt = 1; attempt <= maxRetries; attempt++) {
+    if (options.deadlineMs && attempt > 1 && Date.now() >= options.deadlineMs) {
+      Logger.log('fetchWithRetry_: soft time budget reached before attempt ' + attempt + ' — stopping retries.');
+      return { error: lastErr || { message: 'Time budget exceeded' } };
+    }
     try {
       var resp = UrlFetchApp.fetch(url, fetchOptions_());
       var data = JSON.parse(resp.getContentText());
@@ -360,9 +380,19 @@ function fetchWithRetry_(url, maxRetries) {
           'avoid running the catch-up functions in the same window as a daily import.');
         return { error: data.error };
       }
+      if (data.error && options.failFastOnOverload && isQueryOverloadMetaError_(data.error)) {
+        Logger.log('fetchWithRetry_: query overload/unknown error (' + JSON.stringify(data.error) +
+          ') — failing fast so caller can reduce limit or split date range.');
+        return { error: data.error };
+      }
       if (data.error && isTransientMetaError_(data.error)) {
+        lastErr = data.error;
         if (attempt === maxRetries) {
           Logger.log('fetchWithRetry_ giving up after ' + maxRetries + ' attempts. Meta\'s actual error: ' + JSON.stringify(data.error));
+          return { error: data.error };
+        }
+        if (options.deadlineMs && (Date.now() + wait) >= options.deadlineMs) {
+          Logger.log('fetchWithRetry_ stopping before ' + wait + 'ms backoff to stay within time budget. Meta\'s error: ' + JSON.stringify(data.error));
           return { error: data.error };
         }
         Logger.log('fetchWithRetry_ attempt ' + attempt + ' failed (' + JSON.stringify(data.error) + '), retrying in ' + wait + 'ms');
@@ -378,7 +408,7 @@ function fetchWithRetry_(url, maxRetries) {
       return { error: { message: e.message } };
     }
   }
-  return { error: { message: 'Max retries exceeded' } };
+  return { error: lastErr || { message: 'Max retries exceeded' } };
 }
 
 // One row: [Account ID, Account Name, Ad set name] + the campaign fields.
@@ -622,6 +652,16 @@ function appendAdSetRowsSafe_(sheet, rows) {
   sheet.getRange(start, 1, rows.length, rows[0].length).setValues(rows);
 }
 
+function appendRowsSafe_(sheet, rows) {
+  if (!rows || !rows.length) return;
+  var cols = rows[0].length;
+  ensureColumns_(sheet, cols);
+  var start = sheet.getLastRow() + 1;
+  var need = start + rows.length - 1;
+  if (need > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), need - sheet.getMaxRows());
+  sheet.getRange(start, 1, rows.length, cols).setValues(rows);
+}
+
 function backfillRemainingAdSetData() {
   var start = new Date('2026-06-01');
   var end = new Date(getYesterday());
@@ -748,8 +788,8 @@ var ADSET_AGEGENDER_SHEET_ = 'data_adset_agegender';
 // Pulled out as named constants (Aug 2026) so WorkbookRollover.gs can pre-create these
 // sheets with the EXACT same headers, instead of a second hand-typed copy that could
 // silently drift out of sync with these.
-var ADSET_PLACEMENT_HEADERS_ = ['Date', 'Campaign name', 'Ad set name', 'Placement', 'Spend', 'Impressions', 'Clicks', 'Reach', 'CTR', 'Purchases', 'Purchase value'];
-var ADSET_AGEGENDER_HEADERS_ = ['Date', 'Campaign name', 'Ad set name', 'Age', 'Gender', 'Spend', 'Impressions', 'Clicks', 'Reach', 'Purchases', 'Purchase value'];
+var ADSET_PLACEMENT_HEADERS_ = ['Date', 'Campaign name', 'Ad set name', 'Placement', 'Spend', 'Impressions', 'Clicks', 'Reach', 'CTR', 'Purchases', 'Purchase value', 'Account ID', 'Account Name'];
+var ADSET_AGEGENDER_HEADERS_ = ['Date', 'Campaign name', 'Ad set name', 'Age', 'Gender', 'Spend', 'Impressions', 'Clicks', 'Reach', 'Purchases', 'Purchase value', 'Account ID', 'Account Name'];
 
 // FIXED (Aug 2026): this is why data_adset_placement / data_adset_agegender went stale
 // at Aug 17 while "data - adset - by day" kept updating fine — the exact same disease
@@ -1009,6 +1049,13 @@ function importAdSetAgeGenderDaily() {
         Logger.log('importAdSetAgeGenderDaily error: ' + errorMessage);
         break;
       }
+      var dailyAccId = typeof ACCOUNT_ID !== 'undefined' ? ACCOUNT_ID : '';
+      var dailyAccName = '';
+      if (typeof AD_ACCOUNTS !== 'undefined' && AD_ACCOUNTS.length) {
+        for (var ai = 0; ai < AD_ACCOUNTS.length; ai++) {
+          if (AD_ACCOUNTS[ai].id === dailyAccId) { dailyAccName = AD_ACCOUNTS[ai].name || ''; break; }
+        }
+      }
       var pageRows = (data.data || []).map(function (item) {
         var purchases = av_(item.actions, 'omni_purchase') + av_(item.actions, 'purchase');
         var purchaseValue = av_(item.action_values, 'omni_purchase') + av_(item.action_values, 'purchase');
@@ -1016,7 +1063,8 @@ function importAdSetAgeGenderDaily() {
           item.date_start || '', item.campaign_name || '', item.adset_name || '',
           item.age || 'unknown', item.gender || 'unknown',
           parseFloat(item.spend) || 0, parseInt(item.impressions) || 0, parseInt(item.clicks) || 0,
-          parseInt(item.reach) || 0, purchases, purchaseValue
+          parseInt(item.reach) || 0, purchases, purchaseValue,
+          dailyAccId, dailyAccName
         ];
       });
       appendAdSetAgeGenderStagingRows_(pageRows);
@@ -1225,49 +1273,68 @@ function importAdSetAgeGenderRange_(sinceStr, untilStr) {
 // partway," so a bad day never silently wipes good existing rows (see the FIXED note on
 // importAdSetBreakdownData() above for the bug this replaces).
 function fetchAdSetBreakdownRows_(sinceStr, untilStr, breakdownFields, isPlacement) {
-  var params = {
-    level: 'adset',
-    time_increment: 1,
-    include_archived: true,
-    breakdowns: breakdownFields.join(','),
-    fields: 'adset_name,campaign_name,spend,impressions,clicks,reach,ctr,date_start,actions,action_values',
-    time_range: JSON.stringify({ since: sinceStr, until: untilStr }),
-    limit: 500
-  };
-  var qs = Object.keys(params).map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(String(params[k])); }).join('&');
-  var base = 'https://graph.facebook.com/v18.0/' + ACCOUNT_ID + '/insights';
-  var next = null, out = [], errorMessage = '';
-  do {
-    var url = next ? next : base + '?' + qs;
-    var data = fetchWithRetry_(url);
-    if (!data || data.error) {
-      errorMessage = (data && data.error) ? JSON.stringify(data.error) : 'no response from fetchWithRetry_';
-      Logger.log('adset breakdown error (' + breakdownFields.join(',') + '): ' + errorMessage);
-      return { rows: out, ok: false, errorMessage: errorMessage };   // stop pagination, flag the whole fetch as failed
-    }
-    (data.data || []).forEach(function (item) {
-      var purchases = av_(item.actions, 'omni_purchase') + av_(item.actions, 'purchase');
-      var purchaseValue = av_(item.action_values, 'omni_purchase') + av_(item.action_values, 'purchase');
-      if (isPlacement) {
-        var placement = (item.publisher_platform || 'unknown') + '_' + (item.platform_position || 'unknown');
-        out.push([
-          item.date_start || '', item.campaign_name || '', item.adset_name || '', placement,
-          parseFloat(item.spend) || 0, parseInt(item.impressions) || 0, parseInt(item.clicks) || 0,
-          parseInt(item.reach) || 0, parseFloat(item.ctr) || 0, purchases, purchaseValue
-        ]);
-      } else {
-        out.push([
-          item.date_start || '', item.campaign_name || '', item.adset_name || '',
-          item.age || 'unknown', item.gender || 'unknown',
-          parseFloat(item.spend) || 0, parseInt(item.impressions) || 0, parseInt(item.clicks) || 0,
-          parseInt(item.reach) || 0, purchases, purchaseValue
-        ]);
+  var accounts = (typeof AD_ACCOUNTS !== 'undefined' && AD_ACCOUNTS.length)
+    ? AD_ACCOUNTS
+    : [{ id: (typeof ACCOUNT_ID !== 'undefined' ? ACCOUNT_ID : ''), name: 'Default' }];
+  var out = [];
+  var anySuccess = false;
+  var lastError = '';
+
+  for (var i = 0; i < accounts.length; i++) {
+    var acc = accounts[i];
+    var params = {
+      level: 'adset',
+      time_increment: 1,
+      include_archived: true,
+      breakdowns: breakdownFields.join(','),
+      fields: 'adset_name,campaign_name,spend,impressions,clicks,reach,ctr,date_start,actions,action_values',
+      time_range: JSON.stringify({ since: sinceStr, until: untilStr }),
+      limit: 500
+    };
+    var qs = Object.keys(params).map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(String(params[k])); }).join('&');
+    var base = 'https://graph.facebook.com/v18.0/' + acc.id + '/insights';
+    var next = null;
+    var accFailed = false;
+
+    do {
+      var url = next ? next : base + '?' + qs;
+      var data = fetchWithRetry_(url);
+      if (!data || data.error) {
+        lastError = (data && data.error) ? JSON.stringify(data.error) : 'no response from fetchWithRetry_';
+        Logger.log('adset breakdown error (' + breakdownFields.join(',') + ', ' + acc.name + '): ' + lastError);
+        accFailed = true;
+        break;
       }
-    });
-    next = (data.paging && data.paging.next) ? data.paging.next : null;
-    if (next) Utilities.sleep(400);
-  } while (next);
-  return { rows: out, ok: true, errorMessage: '' };
+      (data.data || []).forEach(function (item) {
+        var purchases = av_(item.actions, 'omni_purchase') + av_(item.actions, 'purchase');
+        var purchaseValue = av_(item.action_values, 'omni_purchase') + av_(item.action_values, 'purchase');
+        if (isPlacement) {
+          var placement = (item.publisher_platform || 'unknown') + '_' + (item.platform_position || 'unknown');
+          out.push([
+            item.date_start || '', item.campaign_name || '', item.adset_name || '', placement,
+            parseFloat(item.spend) || 0, parseInt(item.impressions) || 0, parseInt(item.clicks) || 0,
+            parseInt(item.reach) || 0, parseFloat(item.ctr) || 0, purchases, purchaseValue,
+            acc.id || '', acc.name || ''
+          ]);
+        } else {
+          out.push([
+            item.date_start || '', item.campaign_name || '', item.adset_name || '',
+            item.age || 'unknown', item.gender || 'unknown',
+            parseFloat(item.spend) || 0, parseInt(item.impressions) || 0, parseInt(item.clicks) || 0,
+            parseInt(item.reach) || 0, purchases, purchaseValue,
+            acc.id || '', acc.name || ''
+          ]);
+        }
+      });
+      next = (data.paging && data.paging.next) ? data.paging.next : null;
+      if (next) Utilities.sleep(400);
+    } while (next);
+
+    if (!accFailed) anySuccess = true;
+    if (i < accounts.length - 1) Utilities.sleep(200);
+  }
+
+  return { rows: out, ok: anySuccess || out.length > 0 || !lastError, errorMessage: lastError };
 }
 
 function getOrCreateAdSetBreakdownSheet_(name, headers) {
@@ -1294,7 +1361,10 @@ function ensureAdSetBreakdownHeaders_(sheet, headers) {
   var first = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
   var blank = first.every(function (c) { return String(c).trim() === ''; });
   var lastExpected = headers[headers.length - 1];
-  var matches = !blank && String(first[headers.length - 1] || '').trim() === lastExpected;
+  var prevExpected = headers.length >= 2 ? headers[headers.length - 2] : '';
+  var matches = !blank &&
+    String(first[headers.length - 1] || '').trim() === lastExpected &&
+    (!prevExpected || String(first[headers.length - 2] || '').trim() === prevExpected);
   if (blank || matches) {
     if (blank) sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     return;

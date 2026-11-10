@@ -318,49 +318,312 @@ function backfillAllHistory_CampaignLevel() {
   Logger.log('backfillAllHistory_CampaignLevel: done ' + months + ' months, 2025-11-13 .. ' + dayKey_(end));
 }
 
-function backfillDateRange(sinceStr, untilStr) {
+var CAMPAIGN_BACKFILL_TIME_BUDGET_MS_ = 270000;   // 4.5 min soft budget (Apps Script hard cap is 6 min)
+var CAMPAIGN_INSIGHTS_INITIAL_CHUNK_DAYS_ = 14;   // split multi-week/90-day queries proactively to avoid Meta code 1/99 & code 2/1504044 timeouts
+var CAMPAIGN_INSIGHTS_LIMIT_STEPS_ = [200, 100, 50, 25];
+
+/**
+ * Kéo dữ liệu Campaign 30 ngày gần nhất (đến hôm qua) cho cả 9 tài khoản để bộ lọc "30 ngày qua" có đủ dữ liệu.
+ */
+function backfillLast30Days() {
+  var until = getYesterday();
+  var since = getDateNDaysAgo_(30);
+  backfillDateRange(since, until, { deadlineMs: Date.now() + CAMPAIGN_BACKFILL_TIME_BUDGET_MS_ });
+}
+
+/**
+ * Kéo dữ liệu Campaign 90 ngày gần nhất (đến hôm qua) cho cả 9 tài khoản.
+ * Chia theo từng cửa sổ 30 ngày (mới nhất trước) + adaptive chunking (14 ngày -> 7 -> 3 -> 1 ngày)
+ * để tránh Meta Graph API timeout (code 1/99, code 2/1504044) và giới hạn 6 phút của Apps Script.
+ */
+function backfillLast90Days() {
+  var until = getYesterday();
+  var since = getDateNDaysAgo_(90);
+  var deadlineMs = Date.now() + CAMPAIGN_BACKFILL_TIME_BUDGET_MS_;
+  var settingsByAccount = {};
+  var windows = (typeof buildDateChunks_ === 'function')
+    ? buildDateChunks_(since, until, 30).reverse()
+    : [{ since: since, until: until }];
+
+  var totalRows = 0;
+  var completedWindows = 0;
+  var partialOrFailedWindows = [];
+  var stateByAccount = {};
+
+  for (var i = 0; i < windows.length; i++) {
+    var w = windows[i];
+    if (Date.now() >= deadlineMs) {
+      var remaining = windows.slice(i).map(function (rem) {
+        return "backfillDateRange('" + rem.since + "', '" + rem.until + "')";
+      });
+      Logger.log('⚠️ backfillLast90Days: đạt ngưỡng thời gian an toàn (~4.5 phút) sau ' + completedWindows +
+        '/' + windows.length + ' cửa sổ. Chạy tiếp các lệnh sau để hoàn tất phần còn lại: ' + remaining.join(' ; '));
+      break;
+    }
+
+    Logger.log('backfillLast90Days: cửa sổ ' + (i + 1) + '/' + windows.length + ' (' + w.since + '..' + w.until + ')');
+    var res = backfillDateRange(w.since, w.until, {
+      deadlineMs: deadlineMs,
+      settingsByAccount: settingsByAccount,
+      stateByAccount: stateByAccount
+    });
+    completedWindows++;
+    if (res) {
+      totalRows += (res.rowsCount || 0);
+      if (!res.ok) {
+        partialOrFailedWindows.push(w.since + '..' + w.until);
+      }
+    }
+    if (i < windows.length - 1 && Date.now() + 2000 < deadlineMs) {
+      Utilities.sleep(1000);
+    }
+  }
+
+  Logger.log('backfillLast90Days: hoàn tất ' + completedWindows + '/' + windows.length +
+    ' cửa sổ (' + since + '..' + until + '), tổng ' + totalRows + ' dòng' +
+    (partialOrFailedWindows.length ? '. Cửa sổ lỗi/thiếu một phần: ' + partialOrFailedWindows.join(', ') : '.'));
+}
+
+function nextSmallerCampaignLimit_(currentLimit) {
+  for (var i = 0; i < CAMPAIGN_INSIGHTS_LIMIT_STEPS_.length; i++) {
+    if (CAMPAIGN_INSIGHTS_LIMIT_STEPS_[i] < currentLimit) return CAMPAIGN_INSIGHTS_LIMIT_STEPS_[i];
+  }
+  return null;
+}
+
+function shouldAdaptCampaignQueryError_(err) {
+  if (typeof shouldAdaptAdQueryError_ === 'function') return shouldAdaptAdQueryError_(err);
+  if (!err) return false;
+  if (typeof isAccountRateLimited_ === 'function' && isAccountRateLimited_(err)) return false;
+  if (typeof isQueryOverloadMetaError_ === 'function' && isQueryOverloadMetaError_(err)) return true;
+  if (err.code === 1 || err.code === 2) return true;
+  var msg = String(err.message || '').toLowerCase();
+  return msg.indexOf('reduce the amount of data') !== -1 ||
+         msg.indexOf('unknown error') !== -1 ||
+         msg.indexOf('timeout') !== -1 ||
+         msg.indexOf('timed out') !== -1;
+}
+
+function fetchCampaignRowsForAccount_(acc, settings, sinceStr, untilStr, opts) {
+  opts = opts || {};
+  var deadlineMs = opts.deadlineMs || 0;
+  var initialChunkDays = opts.chunkDays || CAMPAIGN_INSIGHTS_INITIAL_CHUNK_DAYS_;
+  var initialLimit = opts.initialLimit || CAMPAIGN_INSIGHTS_LIMIT_STEPS_[0];
+  var minLimit = CAMPAIGN_INSIGHTS_LIMIT_STEPS_[CAMPAIGN_INSIGHTS_LIMIT_STEPS_.length - 1];
+
+  var state = opts.state || {
+    chunkDays: Math.max(1, initialChunkDays),
+    limit: initialLimit
+  };
+
+  var queue = (typeof buildDateChunks_ === 'function')
+    ? buildDateChunks_(sinceStr, untilStr, state.chunkDays).map(function (c) {
+        return { since: c.since, until: c.until, limit: state.limit };
+      })
+    : [{ since: sinceStr, until: untilStr, limit: state.limit }];
+
+  var accRows = [];
+  var baseUrl = 'https://graph.facebook.com/v18.0/' + acc.id + '/insights';
+
+  while (queue.length > 0) {
+    if (deadlineMs && Date.now() >= deadlineMs) {
+      return { ok: false, rows: [], errorMessage: 'Soft time budget reached' };
+    }
+
+    var seg = queue.shift();
+    var spanDays = (typeof diffDaysInclusive_ === 'function')
+      ? diffDaysInclusive_(seg.since, seg.until)
+      : 1;
+    if (spanDays <= 0) continue;
+
+    if (spanDays > state.chunkDays && typeof buildDateChunks_ === 'function') {
+      var subChunks = buildDateChunks_(seg.since, seg.until, state.chunkDays).map(function (c) {
+        return { since: c.since, until: c.until, limit: Math.min(seg.limit, state.limit) };
+      });
+      queue = subChunks.concat(queue);
+      continue;
+    }
+
+    var reqLimit = Math.min(seg.limit, state.limit);
+    var params = {
+      level: 'campaign',
+      time_increment: 1,
+      include_archived: true,
+      fields: INSIGHT_FIELDS_,
+      time_range: JSON.stringify({ since: seg.since, until: seg.until }),
+      limit: reqLimit
+    };
+    var qs = Object.keys(params).map(function (k) {
+      return encodeURIComponent(k) + '=' + encodeURIComponent(String(params[k]));
+    }).join('&');
+
+    var canFallback = (spanDays > 1) || (reqLimit > minLimit);
+    var retryOpts = { failFastOnOverload: canFallback, deadlineMs: deadlineMs };
+    var nextPage = null;
+    var segRows = [];
+    var segErr = null;
+
+    do {
+      if (deadlineMs && Date.now() >= deadlineMs) {
+        return { ok: false, rows: [], errorMessage: 'Soft time budget reached' };
+      }
+      var fullUrl = nextPage ? nextPage : (baseUrl + '?' + qs);
+      try {
+        var data = (typeof fetchWithRetry_ === 'function')
+          ? fetchWithRetry_(fullUrl, canFallback ? 3 : 2, retryOpts)
+          : JSON.parse(UrlFetchApp.fetch(fullUrl, fetchOptions_()).getContentText());
+        if (!data || data.error) {
+          segErr = (data && data.error) ? data.error : { message: 'no response from fetchWithRetry_' };
+          break;
+        }
+        (data.data || []).forEach(function (item) { segRows.push(buildRowFromInsight_(item, settings, acc)); });
+        nextPage = (data.paging && data.paging.next) ? data.paging.next : null;
+        if (nextPage) Utilities.sleep(150);
+      } catch (e) {
+        segErr = { message: e.message };
+        break;
+      }
+    } while (nextPage);
+
+    if (!segErr) {
+      for (var r = 0; r < segRows.length; r++) accRows.push(segRows[r]);
+      continue;
+    }
+
+    var errText = JSON.stringify(segErr);
+    if (typeof isAccountRateLimited_ === 'function' && isAccountRateLimited_(segErr)) {
+      Logger.log('backfillDateRange rate-limited (' + acc.name + ', ' + seg.since + '..' + seg.until + '): ' + errText);
+      return { ok: false, rows: [], errorMessage: errText };
+    }
+
+    if (shouldAdaptCampaignQueryError_(segErr)) {
+      if (spanDays > 1 && typeof parseUtcDateMs_ === 'function' && typeof formatUtcDate_ === 'function') {
+        var sMs = parseUtcDateMs_(seg.since);
+        var midOffset = Math.floor((spanDays - 1) / 2);
+        var midMs = sMs + midOffset * 86400000;
+        var firstEnd = formatUtcDate_(midMs);
+        var secondStart = formatUtcDate_(midMs + 86400000);
+        state.chunkDays = Math.min(state.chunkDays, Math.max(1, Math.floor(spanDays / 2)));
+        Logger.log('backfillDateRange overload (' + acc.name + ', ' + seg.since + '..' + seg.until +
+          ', limit=' + reqLimit + '): ' + errText + ' — splitting into ' +
+          seg.since + '..' + firstEnd + ' & ' + secondStart + '..' + seg.until +
+          ' (new chunkDays=' + state.chunkDays + ').');
+        queue = [
+          { since: seg.since, until: firstEnd, limit: reqLimit },
+          { since: secondStart, until: seg.until, limit: reqLimit }
+        ].concat(queue);
+        Utilities.sleep(300);
+        continue;
+      }
+
+      var smallerLimit = nextSmallerCampaignLimit_(reqLimit);
+      if (smallerLimit) {
+        state.limit = smallerLimit;
+        Logger.log('backfillDateRange overload (' + acc.name + ', ' + seg.since + ', limit=' + reqLimit +
+          '): ' + errText + ' — reducing limit to ' + smallerLimit + '.');
+        queue = [{ since: seg.since, until: seg.until, limit: smallerLimit }].concat(queue);
+        Utilities.sleep(300);
+        continue;
+      }
+    }
+
+    Logger.log('backfillDateRange API error (' + acc.name + ', ' + seg.since + '..' + seg.until + '): ' + errText);
+    return { ok: false, rows: [], errorMessage: errText };
+  }
+
+  return { ok: true, rows: accRows, errorMessage: '' };
+}
+
+function backfillDateRange(sinceStr, untilStr, opts) {
+  opts = opts || {};
+  var deadlineMs = opts.deadlineMs || (Date.now() + CAMPAIGN_BACKFILL_TIME_BUDGET_MS_);
+  var settingsByAccount = opts.settingsByAccount || {};
+  var stateByAccount = opts.stateByAccount || {};
+
   var ss = getCampaignSpreadsheet_();
   var dest = ss.getSheetByName('data - by day');
   if (!dest) dest = ss.insertSheet('data - by day');
   ensureCampaignHeaders_(dest);
 
-  // 1) idempotency: remove any existing rows already in [since, until]
-  removeRowsInDateRange_(dest, sinceStr, untilStr);
+  // 1) fetch (daily granularity, chunked + adaptive fallback) across all configured AD_ACCOUNTS BEFORE clearing
+  var accounts = (typeof AD_ACCOUNTS !== 'undefined' && AD_ACCOUNTS.length)
+    ? AD_ACCOUNTS
+    : [{ id: (typeof ACCOUNT_ID !== 'undefined' ? ACCOUNT_ID : ''), name: 'Default' }];
+  var allRows = [];
+  var succeededAccounts = 0;
+  var succeededAccountIds = {};
+  var failedAccounts = [];
 
-  // 2) fetch (daily granularity, paginated) and append
-  var settings = fetchCampaignSettings();
-  var baseUrl = 'https://graph.facebook.com/v18.0/' + ACCOUNT_ID + '/insights';
-  var params = {
-    level: 'campaign',
-    time_increment: 1,
-    include_archived: true,
-    fields: INSIGHT_FIELDS_,
-    time_range: JSON.stringify({ since: sinceStr, until: untilStr }),
-    limit: 500
-  };
-  var qs = Object.keys(params).map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(String(params[k])); }).join('&');
-
-  var nextPage = null, allRows = [];
-  do {
-    var fullUrl = nextPage ? nextPage : (baseUrl + '?' + qs);
-    try {
-      var resp = UrlFetchApp.fetch(fullUrl, fetchOptions_());
-      var data = JSON.parse(resp.getContentText());
-      if (data.error) { Logger.log('API error: ' + JSON.stringify(data.error)); break; }
-      (data.data || []).forEach(function (item) { allRows.push(buildRowFromInsight_(item, settings)); });
-      nextPage = (data.paging && data.paging.next) ? data.paging.next : null;
-      Utilities.sleep(200);
-    } catch (e) {
-      Logger.log('backfillDateRange error: ' + e.message);
+  for (var i = 0; i < accounts.length; i++) {
+    var acc = accounts[i];
+    if (deadlineMs && Date.now() >= deadlineMs) {
+      Logger.log('backfillDateRange ' + sinceStr + '..' + untilStr + ': soft time budget reached before ' +
+        acc.name + ' — preserving existing rows for remaining ' + (accounts.length - i) + ' account(s).');
+      for (var j = i; j < accounts.length; j++) {
+        failedAccounts.push(accounts[j].name);
+      }
       break;
     }
-  } while (nextPage);
+
+    var settings = settingsByAccount[acc.id];
+    if (!settings) {
+      settings = fetchCampaignSettings(acc.id);
+      settingsByAccount[acc.id] = settings;
+    }
+
+    if (!stateByAccount[acc.id]) {
+      stateByAccount[acc.id] = {
+        chunkDays: Math.max(1, opts.chunkDays || CAMPAIGN_INSIGHTS_INITIAL_CHUNK_DAYS_),
+        limit: opts.initialLimit || CAMPAIGN_INSIGHTS_LIMIT_STEPS_[0]
+      };
+    }
+
+    var accRes = fetchCampaignRowsForAccount_(acc, settings, sinceStr, untilStr, {
+      deadlineMs: deadlineMs,
+      chunkDays: opts.chunkDays,
+      initialLimit: opts.initialLimit,
+      state: stateByAccount[acc.id]
+    });
+
+    if (accRes.ok) {
+      succeededAccounts++;
+      succeededAccountIds[acc.id] = true;
+      for (var r = 0; r < accRes.rows.length; r++) allRows.push(accRes.rows[r]);
+    } else {
+      failedAccounts.push(acc.name);
+    }
+  }
+
+  if (succeededAccounts === 0) {
+    Logger.log('backfillDateRange ' + sinceStr + '..' + untilStr + ': all accounts failed — existing rows untouched.');
+    return { ok: false, partialOk: false, rowsCount: 0, succeededAccounts: 0, failedAccounts: failedAccounts };
+  }
+
+  // 2) idempotency: remove existing rows in [since, until] only for accounts that succeeded
+  if (failedAccounts.length > 0) {
+    removeRowsInDateRange_(dest, sinceStr, untilStr, succeededAccountIds);
+  } else {
+    removeRowsInDateRange_(dest, sinceStr, untilStr);
+  }
 
   if (allRows.length) {
-    ensureColumns_(dest, 35);
-    dest.getRange(dest.getLastRow() + 1, 1, allRows.length, allRows[0].length).setValues(allRows);
+    ensureColumns_(dest, CAMPAIGN_HEADERS_.length);
+    var startRow = dest.getLastRow() + 1;
+    var need = startRow + allRows.length - 1;
+    if (need > dest.getMaxRows()) dest.insertRowsAfter(dest.getMaxRows(), need - dest.getMaxRows());
+    dest.getRange(startRow, 1, allRows.length, allRows[0].length).setValues(allRows);
   }
-  Logger.log('backfillDateRange ' + sinceStr + '..' + untilStr + ': wrote ' + allRows.length + ' rows.');
+  Logger.log('backfillDateRange ' + sinceStr + '..' + untilStr + ': wrote ' + allRows.length + ' rows across ' +
+    succeededAccounts + '/' + accounts.length + ' account(s)' +
+    (failedAccounts.length ? ' (preserved existing rows for failed/skipped: ' + failedAccounts.join(', ') + ')' : '') + '.');
+
+  return {
+    ok: failedAccounts.length === 0,
+    partialOk: failedAccounts.length > 0 && succeededAccounts > 0,
+    rowsCount: allRows.length,
+    succeededAccounts: succeededAccounts,
+    failedAccounts: failedAccounts
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -625,7 +888,7 @@ function dayKey_(v) {
   return m ? m[1] : s;
 }
 
-function removeRowsInDateRange_(sheet, sinceStr, untilStr) {
+function removeRowsInDateRange_(sheet, sinceStr, untilStr, accountIdSet) {
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return;
   var lastCol = sheet.getLastColumn();
@@ -633,6 +896,10 @@ function removeRowsInDateRange_(sheet, sinceStr, untilStr) {
   var sinceTs = new Date(sinceStr).getTime();
   var untilTs = new Date(untilStr).getTime() + 86399999;
   var kept = values.filter(function (row) {
+    if (accountIdSet) {
+      var rowAccId = String(row[0] || '').trim();
+      if (!accountIdSet[rowAccId]) return true;
+    }
     var k = dayKey_(row[6]);        // col 7 = Reporting ends
     var ts = new Date(k).getTime();
     if (isNaN(ts)) return true;     // keep undated rows
@@ -641,7 +908,8 @@ function removeRowsInDateRange_(sheet, sinceStr, untilStr) {
   var removed = values.length - kept.length;
   sheet.getRange(2, 1, lastRow - 1, lastCol).clearContent();
   if (kept.length) sheet.getRange(2, 1, kept.length, kept[0].length).setValues(kept);
-  Logger.log('removeRowsInDateRange_: cleared ' + removed + ' existing rows in ' + sinceStr + '..' + untilStr);
+  Logger.log('removeRowsInDateRange_: cleared ' + removed + ' existing rows in ' + sinceStr + '..' + untilStr +
+    (accountIdSet ? ' (scoped to ' + Object.keys(accountIdSet).length + ' succeeded account(s))' : ''));
 }
 
 /**

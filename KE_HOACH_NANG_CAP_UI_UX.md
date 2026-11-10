@@ -237,32 +237,32 @@ Tối ưu hóa vũ khí quan trọng nhất của Meta Ads: **Mẫu quảng cáo
 Kế hoạch được chia làm 4 giai đoạn logic, hoàn toàn tương thích với kiến trúc Single-file `index.html` và backend Google Apps Script:
 
 ### Giai đoạn 1: Nâng cấp Nền Tảng Thiết Kế, Bản Địa Hóa & Smart Narrative (Tuần 1)
-- [ ] Tái cấu trúc CSS biến định kiểu (Design Tokens: Slate palette, Emerald, Crimson, Amber, Tabular Numbers).
-- [ ] Chuẩn hóa hàm format `formatVND()` (hỗ trợ hiển thị gọn: `Tr ₫`, `Tỷ ₫`, `K ₫`), sửa triệt để lỗi encoding `â‚«`.
-- [ ] Xây dựng Module **Executive Narrative Storyline**: Tự động sinh câu tóm tắt tình hình 8 tài khoản ở đầu trang.
-- [ ] Bổ sung thanh phân bổ ngân sách 8 tài khoản (**Account Allocation Bar**) trực quan ngay dưới header.
+- [x] Tái cấu trúc CSS biến định kiểu (Design Tokens: Slate palette, Emerald, Crimson, Amber, Tabular Numbers).
+- [x] Chuẩn hóa hàm format `formatVND()` (hỗ trợ hiển thị gọn: `Tr ₫`, `Tỷ ₫`, `K ₫`), sửa triệt để lỗi encoding `â‚«`.
+- [x] Xây dựng Module **Executive Narrative Storyline**: Tự động sinh câu tóm tắt tình hình đa tài khoản ở đầu trang (`renderNarrativeSummary`).
+- [x] Bổ sung thanh phân bổ ngân sách đa tài khoản (**Account Allocation Bar**) trực quan ngay dưới header (`renderAccountAllocation`).
 
 ### Giai đoạn 2: Nâng Cấp Bộ Thẻ KPI Phễu & Mini Sparklines (Tuần 1 - 2)
-- [ ] Tái cấu trúc lại lưới KPI theo 3 tầng phễu (Top, Mid, Bottom Funnel).
-- [ ] Đưa chỉ số **Frequency (Tần suất)** và **CPM** lên nhóm chỉ số loại 1 với huy hiệu cảnh báo bão hòa tệp.
-- [ ] Tích hợp **Mini Sparklines** bằng Canvas/SVG cho từng thẻ KPI chính (Chi tiêu, ROAS, Kết quả, CTR).
-- [ ] Bổ sung logic tính toán **So sánh kép (Dual Delta)**: Hiển thị đồng thời `% thay đổi` và `giá trị tuyệt đối` so với chu kỳ trước.
+- [x] Tái cấu trúc lại lưới KPI theo 3 tầng phễu (Top, Mid, Bottom Funnel).
+- [x] Đưa chỉ số **Frequency (Tần suất)** và **CPM** lên nhóm chỉ số loại 1 với huy hiệu cảnh báo bão hòa tệp (`fatigue-pill`).
+- [x] Tích hợp **Mini Sparklines** bằng Canvas 2D cho các thẻ KPI chính.
+- [x] Bổ sung logic tính toán **So sánh kép (Dual Delta)**: Hiển thị đồng thời `% thay đổi` và `giá trị tuyệt đối` so với chu kỳ trước.
 
 ### Giai đoạn 3: Hiện Đại Hóa Bảng Biểu & Bộ 4 Biểu Đồ Media Buying (Tuần 2 - 3)
-- [ ] Xây dựng bộ 4 biểu đồ Chart.js:
+- [x] Xây dựng bộ 4 biểu đồ Chart.js:
   1. *Trend Combo (Chi tiêu vs ROAS & Doanh thu)*.
   2. *Đấu thầu (Impressions vs CPM)*.
   3. *Lưu lượng (Clicks vs CPC)*.
   4. *Phân bổ đa tài khoản & mục tiêu (Donut)*.
-- [ ] Tích hợp **In-Cell Micro Data Bars** vào bảng Chiến Dịch và Nhóm Quảng Cáo.
-- [ ] Tích hợp **Heatmap Cell Shading** cho các cột chỉ số quan trọng (ROAS, CPA, CTR).
-- [ ] Thêm các nút lọc nhanh 1-click (Top Spend, Top ROAS, Cảnh báo bão hòa).
+- [x] Tích hợp **In-Cell Micro Data Bars** (`data-bar-wrap` / `data-bar-fill`) vào bảng Chiến Dịch và Nhóm Quảng Cáo.
+- [x] Tích hợp **Heatmap Cell Shading** (`heat-hero`, `heat-good`, `heat-warn`, `heat-bad`) cho các cột chỉ số quan trọng (ROAS, CPA, CTR).
+- [x] Thêm các nút lọc nhanh 1-click (`setTableQuickFilter`: Top Chi Tiêu, Top ROAS Cao, Cảnh báo bão hòa, Chi phí chưa ra đơn). *(Lưu ý: cần dọn cụm nút tĩnh `#campaignQuickFilters` cũ đang tham chiếu `applyQuickFilter`)*
 
 ### Giai đoạn 4: Đột Phá Module "Creative Matrix & Ad Gallery" (Tuần 3 - 4)
-- [ ] Xây dựng chế độ xem bảng **Creative Heatmap Matrix** kết hợp thumbnail 45px (zoom preview 200px khi hover).
-- [ ] Bổ sung phân hạng tự động 4 nhóm: *Hero Scale-Ready, Stable, Fatigued, Burn Money*.
-- [ ] Tối ưu hóa bộ lọc phân tích theo Vị trí hiển thị (*Placement: Feed, Reels, Stories*) và Thiết bị (*Mobile vs Desktop*).
-- [ ] Đồng bộ toàn bộ code cải tiến sang `apps-script/Dashboard.html` và kiểm tra 100% chế độ Offline Demo cũng như Online GAS.
+- [x] Xây dựng chế độ xem bảng **Creative Heatmap Matrix** kết hợp thumbnail 45px (zoom preview 200px khi hover).
+- [x] Bổ sung phân hạng tự động 4 nhóm: *Hero Scale-Ready, Stable, Fatigued, Burn Money*.
+- [x] Tối ưu hóa bộ lọc phân tích theo Vị trí hiển thị (*Placement: Feed, Reels, Stories*) và Thiết bị (*Mobile vs Desktop*) qua tab Report Builder / Breakdown.
+- [x] Đồng bộ toàn bộ code cải tiến sang `apps-script/Dashboard.html` và kiểm tra chế độ Offline Demo cũng như Online GAS (`clasp sync`). *(Cần cập nhật thêm TK thứ 9 vào `DEMO_ACCOUNTS` nếu muốn demo offline đủ 9 TK)*
 
 ---
 

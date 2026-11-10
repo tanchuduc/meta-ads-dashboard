@@ -139,13 +139,118 @@ function toDateString(v) {
   const s = String(v == null ? '' : v).trim();
   if (!s) return '';
   const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
-  return m ? m[1] : s;
+  if (m) return m[1];
+  const dmy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (dmy) {
+    return dmy[3] + '-' + ('0' + dmy[2]).slice(-2) + '-' + ('0' + dmy[1]).slice(-2);
+  }
+  return s;
 }
 
 function tsOf(dateStr) {
   if (!dateStr) return NaN;
-  const t = new Date(dateStr).getTime();
+  const s = toDateString(dateStr);
+  const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) {
+    return Date.UTC(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10));
+  }
+  const t = new Date(s).getTime();
   return isNaN(t) ? NaN : t;
+}
+
+function normalizeAccountFilterList_(filters) {
+  var list = (filters && filters.accountIds && filters.accountIds.length)
+    ? filters.accountIds
+    : ((filters && filters.accountId) ? [filters.accountId] : []);
+  return list.map(function (x) { return String(x || '').trim(); }).filter(Boolean);
+}
+
+function rowMatchesAccounts_(rowAccId, rowAccName, selectedAccounts) {
+  if (!selectedAccounts || !selectedAccounts.length) {
+    return false;
+  }
+  if (selectedAccounts.indexOf('__DENIED_EMPTY__') !== -1) {
+    return false;
+  }
+  var id = String(rowAccId || '').trim();
+  if (id) {
+    return selectedAccounts.indexOf(id) !== -1;
+  }
+  // Fallback cho các dòng dữ liệu cũ chưa có cột Account ID: đối chiếu theo tên tài khoản trong AD_ACCOUNTS
+  var name = String(rowAccName || '').trim().toLowerCase();
+  if (name && typeof AD_ACCOUNTS !== 'undefined' && AD_ACCOUNTS.length) {
+    for (var i = 0; i < AD_ACCOUNTS.length; i++) {
+      if (selectedAccounts.indexOf(AD_ACCOUNTS[i].id) !== -1 &&
+          String(AD_ACCOUNTS[i].name || '').trim().toLowerCase() === name) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Xây dựng bảng ánh xạ campaignName -> { accountId, accountName } từ sheet chính
+ * ("data - by day" hoặc "data - adset - by day") để lọc dữ liệu lịch sử chưa có cột Account ID.
+ */
+function buildCampaignAccountMap_(source) {
+  var map = {};
+  try {
+    var sheet = null;
+    if (source === 'adset') {
+      sheet = getAdSetSpreadsheet_().getSheetByName('data - adset - by day');
+    } else {
+      sheet = getSheet_();
+    }
+    if (!sheet || sheet.getLastRow() < 2) return map;
+    var data = sheet.getDataRange().getValues();
+    var hr = findHeaderRow_(data);
+    var idx = resolveHeaders(data[hr]);
+    if (idx.campaignName === -1) return map;
+
+    for (var i = hr + 1; i < data.length; i++) {
+      var r = data[i];
+      var cname = String(r[idx.campaignName] || '').trim();
+      if (!cname) continue;
+      var accId = idx.accountId !== -1 ? String(r[idx.accountId] || '').trim() : '';
+      var accName = idx.accountName !== -1 ? String(r[idx.accountName] || '').trim() : '';
+      if (!accId && !accName) continue;
+      if (!map[cname] || (!map[cname].accountId && accId)) {
+        map[cname] = { accountId: accId, accountName: accName };
+      }
+    }
+  } catch (e) {
+    Logger.log('buildCampaignAccountMap_ (' + (source || 'campaign') + ') warning: ' + e.message);
+  }
+  return map;
+}
+
+function isRowAuthorizedForScope_(rowAccId, rowAccName, campaignName, effectiveAccounts, allowUnknownForSuperAdmin, campMapState) {
+  var accId = String(rowAccId || '').trim();
+  var accName = String(rowAccName || '').trim();
+  var cname = String(campaignName || '').trim();
+
+  if (!accId && !accName && cname && campMapState) {
+    if (campMapState.map === null) {
+      campMapState.map = buildCampaignAccountMap_(campMapState.source || 'campaign');
+    }
+    var mapped = campMapState.map[cname];
+    if (!mapped && campMapState.fallbackSource) {
+      if (campMapState.fallbackMap === null) {
+        campMapState.fallbackMap = buildCampaignAccountMap_(campMapState.fallbackSource);
+      }
+      mapped = campMapState.fallbackMap[cname];
+    }
+    if (mapped) {
+      accId = mapped.accountId || '';
+      accName = mapped.accountName || '';
+    }
+  }
+
+  if (accId || accName) {
+    return rowMatchesAccounts_(accId, accName, effectiveAccounts);
+  }
+  return !!allowUnknownForSuperAdmin;
 }
 
 function rankToPoints(v) {
@@ -176,13 +281,27 @@ function derive(spent, cpm, ctrLink) {
 }
 
 // ── MAIN DATA CALL ──────────────────────────────────────────────────────────
-function getDashboardData(filters) {
+function getDashboardData(filters, sessionToken) {
   filters = filters || {};
+  var auth = requireAuth_(resolveSessionToken_(sessionToken, filters));
+  if (!auth.ok) {
+    return {
+      authError: true, error: auth.error,
+      accounts: [], rows: [], campaigns: [], summary: emptySummary_(),
+      resolved: {}, missing: [], sheetName: '', generatedAt: '', allCampaignNames: []
+    };
+  }
+  var allowedAccounts = getAllowedAccountObjects_(auth.user);
+  var allowedAccountIds = getAllowedAccountIds_(auth.user);
+  var effectiveAccounts = enforceAccountScope_(filters, auth.user);
+  var allowUnknownForSuperAdmin = isUnfilteredSuperAdmin_(filters, auth.user);
+  var allowUnknownForUserScope = (auth.user && auth.user.role === 'SUPER_ADMIN');
+
   try {
     const sheet = getSheet_();
     const range = sheet.getDataRange().getValues();
     if (range.length < 2) {
-      return okEmpty_('Sheet "' + sheet.getName() + '" has no data rows.');
+      return okEmpty_('Sheet "' + sheet.getName() + '" has no data rows.', allowedAccounts);
     }
 
     const headerRowIdx = findHeaderRow_(range);
@@ -251,14 +370,26 @@ function getDashboardData(filters) {
     });
 
     if (!rows.length) {
-      return okEmpty_('Found headers on row ' + (headerRowIdx + 1) + ', but there are no data rows beneath them.');
+      return okEmpty_('Found headers on row ' + (headerRowIdx + 1) + ', but there are no data rows beneath them.', allowedAccounts);
     }
 
-    // 1) row-level filters
-    let filteredRows = rows.filter(function (row) {
-      var selectedAccounts = filters.accountIds || (filters.accountId ? [filters.accountId] : []);
-      if (selectedAccounts.length > 0 && selectedAccounts.indexOf('ALL') === -1) {
-        if (row.accountId && selectedAccounts.indexOf(row.accountId) === -1) return false;
+    // Scope rows strictly to accounts the authenticated user is allowed to see
+    const authorizedRows = rows.filter(function (row) {
+      if (row.accountId || row.accountName) {
+        return rowMatchesAccounts_(row.accountId, row.accountName, allowedAccountIds);
+      }
+      return allowUnknownForUserScope;
+    });
+
+    // 1) row-level filters (using effectiveAccounts enforced by RBAC)
+    const fromTs = filters.dateFrom ? tsOf(filters.dateFrom) : -Infinity;
+    const toTs = filters.dateTo ? (tsOf(filters.dateTo) + 86399999) : Infinity;
+
+    let filteredRows = authorizedRows.filter(function (row) {
+      if (row.accountId || row.accountName) {
+        if (!rowMatchesAccounts_(row.accountId, row.accountName, effectiveAccounts)) return false;
+      } else if (!allowUnknownForSuperAdmin) {
+        return false;
       }
       if (filters.search) {
         var needle = String(filters.search).toLowerCase().trim();
@@ -274,8 +405,8 @@ function getDashboardData(filters) {
       if (filters.dateFrom || filters.dateTo) {
         const t = row.reportingEndsTs;
         if (isNaN(t)) return false;
-        if (filters.dateFrom && t < new Date(filters.dateFrom).getTime()) return false;
-        if (filters.dateTo && t > new Date(filters.dateTo).getTime() + 86399999) return false;
+        if (filters.dateFrom && !isNaN(fromTs) && t < fromTs) return false;
+        if (filters.dateTo && !isNaN(toTs) && t > toTs) return false;
       }
       return true;
     });
@@ -302,7 +433,7 @@ function getDashboardData(filters) {
     const summary = buildSummary_(finalRows, campaigns);
 
     return {
-      accounts: (typeof AD_ACCOUNTS !== 'undefined' ? AD_ACCOUNTS : []),
+      accounts: allowedAccounts,
       rows: finalRows,
       campaigns: campaigns,
       summary: summary,
@@ -310,14 +441,14 @@ function getDashboardData(filters) {
       missing: missing,
       sheetName: sheet.getName(),
       generatedAt: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm'),
-      // All campaign names present in the sheet (unfiltered) — feeds the Search Campaign
-      // autocomplete dropdown on the frontend, independent of whatever filters are active.
-      allCampaignNames: distinctCampaignNames_(rows),
+      // All campaign names within user's authorized accounts — feeds Search Campaign autocomplete
+      allCampaignNames: distinctCampaignNames_(authorizedRows),
       error: null
     };
 
   } catch (err) {
     return {
+      accounts: allowedAccounts,
       rows: [], campaigns: [], summary: emptySummary_(),
       resolved: {}, missing: [], sheetName: '',
       generatedAt: '', allCampaignNames: [], error: err.message || String(err)
@@ -337,10 +468,13 @@ function distinctCampaignNames_(rows) {
 function aggregateByCampaign_(rows, statusMap) {
   const map = {};
   rows.forEach(function (row) {
-    const key = row.campaignName;
+    const key = row._groupKey || row.campaignName;
+    const displayName = row._displayName || row.campaignName;
     if (!map[key]) {
       map[key] = {
-        campaignName: key,
+        campaignName: displayName,
+        accountName: row.accountName || '',
+        realCampaignName: row._realCampaign || '',
         objective: row.objective,
         bidStrategy: row.bidStrategy || '',
         dailyBudget: row.dailyBudget || 0,
@@ -400,6 +534,8 @@ function aggregateByCampaign_(rows, statusMap) {
     if (row.dailyBudget > 0 && a.dailyBudget === 0) a.dailyBudget = row.dailyBudget;
     if (row.optimizationGoal && !a.optimizationGoal) a.optimizationGoal = row.optimizationGoal;
 
+    if (row.accountName && !a.accountName) a.accountName = row.accountName;
+    if (row._realCampaign && !a.realCampaignName) a.realCampaignName = row._realCampaign;
     if (!row.objective || a.objective === 'Unknown') a.objective = row.objective || a.objective;
     if (!isNaN(row.reportingEndsTs) && row.reportingEndsTs > a.latestTs) {
       a.latestTs = row.reportingEndsTs;
@@ -450,10 +586,12 @@ function aggregateByCampaign_(rows, statusMap) {
     const costPer3sPlay = a.video3s > 0 ? a.spent / a.video3s : null;
     const costPerThruplay = a.thruplays > 0 ? a.spent / a.thruplays : null;
 
-    const status = (statusMap && statusMap[key]) || {};
+    const status = (statusMap && (statusMap[a.campaignName] || statusMap[key])) || {};
 
     return {
       campaignName: a.campaignName,
+      accountName: a.accountName || '',
+      realCampaignName: a.realCampaignName || '',
       objective: a.objective,
       bidStrategy: a.bidStrategy,
       dailyBudget: a.dailyBudget,
@@ -570,8 +708,9 @@ function emptySummary_() {
   };
 }
 
-function okEmpty_(msg) {
+function okEmpty_(msg, allowedAccounts) {
   return {
+    accounts: Array.isArray(allowedAccounts) ? allowedAccounts : [],
     rows: [], campaigns: [], summary: emptySummary_(),
     resolved: {}, missing: [], sheetName: '', generatedAt: '', allCampaignNames: [], error: msg
   };
@@ -615,7 +754,11 @@ function okEmpty_(msg) {
 // AdPipeline.gs, so it's readable directly here with no import (same shared-scope pattern this
 // whole project already relies on) — no need for a dedicated getter function in that file.
 // ═══════════════════════════════════════════════════════════════════════════
-function getPipelineFreshness() {
+function getPipelineFreshness(sessionToken) {
+  var auth = requireAuth_(resolveSessionToken_(sessionToken));
+  if (!auth.ok) {
+    return { ok: false, authError: true, error: auth.error };
+  }
   var props = PropertiesService.getScriptProperties();
   function entry(key, failStreakProp) {
     var last = props.getProperty(PIPELINE_FRESHNESS_PROP_PREFIX_ + key) || null;
@@ -667,7 +810,21 @@ function getPipelineFreshness() {
 var TODAY_LIVE_CACHE_KEY_ = 'TODAY_LIVE_SNAPSHOT_V1';
 var TODAY_LIVE_CACHE_TTL_SECONDS_ = 300; // 5 minutes
 
-function getTodayLiveSnapshot() {
+function getTodayLiveSnapshot(sessionToken) {
+  var auth = requireSuperAdmin_(resolveSessionToken_(sessionToken));
+  if (!auth.ok) {
+    return {
+      ok: false,
+      authError: !!auth.authError,
+      forbidden: !!auth.forbidden,
+      error: auth.error,
+      campaigns: [],
+      asOf: null,
+      adsOk: false,
+      adsError: auth.error,
+      ads: []
+    };
+  }
   var cache = CacheService.getScriptCache();
   var cached = cache.get(TODAY_LIVE_CACHE_KEY_);
   if (cached) {
@@ -933,8 +1090,15 @@ function tierLabel(p) {
  * @param {string} breakdownType - 'age', 'gender', 'platform', or 'placement'
  * @param {object} filters - date filters (dateFrom, dateTo)
  */
-function getBreakdownData(breakdownType, filters) {
+function getBreakdownData(breakdownType, filters, sessionToken) {
   filters = filters || {};
+  var auth = requireAuth_(resolveSessionToken_(sessionToken, filters));
+  if (!auth.ok) {
+    return { authError: true, error: auth.error, rows: [] };
+  }
+  var effectiveAccounts = enforceAccountScope_(filters, auth.user);
+  var allowUnknownForSuperAdmin = isUnfilteredSuperAdmin_(filters, auth.user);
+
   var sheetName = '';
   switch(breakdownType) {
     case 'age': sheetName = 'data_age'; break;
@@ -964,6 +1128,7 @@ function getBreakdownData(breakdownType, filters) {
   if (data.length < 2) return { rows: [] };
 
   var headers = data[0];
+  var hIdx = resolveHeaders(headers);
   var rows = data.slice(1);
 
   // Apply date filters if provided
@@ -971,12 +1136,18 @@ function getBreakdownData(breakdownType, filters) {
   var to = filters.dateTo ? new Date(filters.dateTo) : null;
   if (to) to.setHours(23, 59, 59, 999);
 
+  var campMapState = { source: 'campaign', map: null };
+
   var filtered = rows.filter(function(row) {
     if (!row[0]) return false;
     var d = new Date(row[0]);
     if (from && d < from) return false;
     if (to && d > to) return false;
-    return true;
+
+    var rowAccId = hIdx.accountId !== -1 ? String(row[hIdx.accountId] || '').trim() : '';
+    var rowAccName = hIdx.accountName !== -1 ? String(row[hIdx.accountName] || '').trim() : '';
+    var cname = hIdx.campaignName !== -1 ? String(row[hIdx.campaignName] || '').trim() : String(row[1] || '').trim();
+    return isRowAuthorizedForScope_(rowAccId, rowAccName, cname, effectiveAccounts, allowUnknownForSuperAdmin, campMapState);
   });
 
   // Map to objects (cols 9-12 are the new Purchases/Purchase value/Video plays 3s/100% —
@@ -1067,10 +1238,20 @@ function getBreakdownData(breakdownType, filters) {
 //     on the frontend so it's not confused with the smarter campaign-level Results.
 
 var BREAKDOWN_SHEETS_ = { age: 'data_age', gender: 'data_gender', platform: 'data_platform', placement: 'data_placement', region: 'data_region' };
-var BREAKDOWN_HEADERS_ = ['Date', 'Campaign name', 'Breakdown Value', 'Spend', 'Impressions', 'Clicks', 'Reach', 'CTR', 'Purchases', 'Purchase value', 'Video 3s', 'Video 100%', 'Link clicks'];
+var BREAKDOWN_HEADERS_ = ['Date', 'Campaign name', 'Breakdown Value', 'Spend', 'Impressions', 'Clicks', 'Reach', 'CTR', 'Purchases', 'Purchase value', 'Video 3s', 'Video 100%', 'Link clicks', 'Account ID', 'Account Name'];
 
-function getCustomReport(cfg) {
+function getCustomReport(cfg, sessionToken) {
   cfg = cfg || {};
+  var token = resolveSessionToken_(sessionToken, cfg);
+  var auth = requireAuth_(token);
+  if (!auth.ok) {
+    return { authError: true, error: auth.error, rows: [], campaigns: [] };
+  }
+  var authContext = {
+    effectiveAccounts: enforceAccountScope_(cfg, auth.user),
+    allowUnknownForSuperAdmin: isUnfilteredSuperAdmin_(cfg, auth.user)
+  };
+
   var dims = cfg.breakdowns || [];
   if (!dims.length) return { error: 'Pick a breakdown dimension.' };
 
@@ -1097,7 +1278,7 @@ function getCustomReport(cfg) {
     sheet.getRange(1, 1, 1, BREAKDOWN_HEADERS_.length).setValues([BREAKDOWN_HEADERS_]);
     return {
       rows: [],
-      campaigns: (getReportCampaigns(cfg).campaigns || []),
+      campaigns: (getReportCampaigns(cfg, token).campaigns || []),
       note: 'Sheet "' + sheetName + '" đã được tự động tạo nhưng chưa có dữ liệu. Hãy chạy hàm importBreakdownData() hoặc syncTatCaDuLieu() để đồng bộ dữ liệu breakdown từ Meta Ads.'
     };
   }
@@ -1106,18 +1287,18 @@ function getCustomReport(cfg) {
   if (data.length < 2) {
     return {
       rows: [],
-      campaigns: (getReportCampaigns(cfg).campaigns || []),
+      campaigns: (getReportCampaigns(cfg, token).campaigns || []),
       note: 'Sheet "' + sheetName + '" hiện chưa có dữ liệu. Hãy chạy hàm importBreakdownData() hoặc syncTatCaDuLieu() để đồng bộ dữ liệu breakdown từ Meta Ads.'
     };
   }
-  return aggregateBreakdownData_(data, cfg, dim, dims.length > 1);
+  return aggregateBreakdownData_(data, cfg, dim, dims.length > 1, authContext);
 }
 
 // Shared by getCustomReport() (live sheet) and ArchiveTools.gs's getCustomReportFromCsv()
-// (uploaded CSV) — same 13-column row shape either way, so the exact same aggregation
+// (uploaded CSV) — same 13/15-column row shape either way, so the exact same aggregation
 // runs regardless of source. Pulled out (Aug 2026) specifically to support archived-year
 // Report Builder without forking this logic into two copies that could drift apart.
-function aggregateBreakdownData_(data, cfg, dim, multiDimsRequested) {
+function aggregateBreakdownData_(data, cfg, dim, multiDimsRequested, authContext) {
   var from = cfg.dateFrom ? new Date(cfg.dateFrom) : null;
   var to = cfg.dateTo ? new Date(cfg.dateTo) : null;
   if (to) to.setHours(23, 59, 59, 999);
@@ -1126,15 +1307,27 @@ function aggregateBreakdownData_(data, cfg, dim, multiDimsRequested) {
   // "Region filter" input, which was already wired up ahead of this backend support.
   var regionFilter = (dim === 'region' && cfg.region) ? String(cfg.region).trim().toLowerCase() : '';
 
-  // columns: [date, campaign, breakdownValue, spend, impressions, clicks, reach, ctr, purchases, purchaseValue, video3s, video100, linkClicks]
+  var hIdx = data.length ? resolveHeaders(data[0]) : { accountId: -1, accountName: -1, campaignName: -1 };
+  var campMapState = authContext ? { source: 'campaign', map: null } : null;
+
+  // columns: [date, campaign, breakdownValue, spend, impressions, clicks, reach, ctr, purchases, purchaseValue, video3s, video100, linkClicks, (optional) accountId, accountName]
   var active = {}, agg = {};
   data.slice(1).forEach(function (r) {
     if (!r[0]) return;
     var d = new Date(r[0]);
     if (from && d < from) return;
     if (to && d > to) return;
-    var cname = String(r[1] || '');
-    if (cname) active[cname] = true;                 // campaigns active in this window
+
+    var cname = hIdx.campaignName !== -1 ? String(r[hIdx.campaignName] || '').trim() : String(r[1] || '').trim();
+    if (authContext) {
+      var rowAccId = hIdx.accountId !== -1 ? String(r[hIdx.accountId] || '').trim() : '';
+      var rowAccName = hIdx.accountName !== -1 ? String(r[hIdx.accountName] || '').trim() : '';
+      if (!isRowAuthorizedForScope_(rowAccId, rowAccName, cname, authContext.effectiveAccounts, authContext.allowUnknownForSuperAdmin, campMapState)) {
+        return;
+      }
+    }
+
+    if (cname) active[cname] = true;                 // campaigns active in this window (within authorized scope)
     if (campaign && cname !== campaign) return;      // optional campaign filter
     var key = String(r[2] || '(none)');
     if (regionFilter && key.toLowerCase().indexOf(regionFilter) === -1) return;
@@ -1185,8 +1378,15 @@ function aggregateBreakdownData_(data, cfg, dim, multiDimsRequested) {
 }
 
 // Distinct campaigns active in a date range (for the report builder's campaign dropdown).
-function getReportCampaigns(cfg) {
+function getReportCampaigns(cfg, sessionToken) {
   cfg = cfg || {};
+  var auth = requireAuth_(resolveSessionToken_(sessionToken, cfg));
+  if (!auth.ok) {
+    return { authError: true, error: auth.error, campaigns: [] };
+  }
+  var effectiveAccounts = enforceAccountScope_(cfg, auth.user);
+  var allowUnknownForSuperAdmin = isUnfilteredSuperAdmin_(cfg, auth.user);
+
   var dim = (cfg.breakdowns && cfg.breakdowns[0]) || 'age';
   var sheetName = BREAKDOWN_SHEETS_[dim] || 'data_age';
   var ss;
@@ -1201,16 +1401,25 @@ function getReportCampaigns(cfg) {
   var from = cfg.dateFrom ? new Date(cfg.dateFrom) : null;
   var to = cfg.dateTo ? new Date(cfg.dateTo) : null;
   if (to) to.setHours(23, 59, 59, 999);
+  var campMapState = { source: 'campaign', map: null };
 
   var sheet = ss.getSheetByName(sheetName);
   if (sheet && sheet.getLastRow() >= 2) {
     var data = sheet.getDataRange().getValues();
+    var hIdx = resolveHeaders(data[0]);
     data.slice(1).forEach(function (r) {
       if (!r[0]) return;
       var d = new Date(r[0]);
       if (from && d < from) return;
       if (to && d > to) return;
-      if (r[1]) set[String(r[1]).trim()] = true;
+      var cname = hIdx.campaignName !== -1 ? String(r[hIdx.campaignName] || '').trim() : String(r[1] || '').trim();
+      if (!cname) return;
+      var rowAccId = hIdx.accountId !== -1 ? String(r[hIdx.accountId] || '').trim() : '';
+      var rowAccName = hIdx.accountName !== -1 ? String(r[hIdx.accountName] || '').trim() : '';
+      if (!isRowAuthorizedForScope_(rowAccId, rowAccName, cname, effectiveAccounts, allowUnknownForSuperAdmin, campMapState)) {
+        return;
+      }
+      set[cname] = true;
     });
   } else {
     // Fallback: Lấy danh sách Campaign từ sheet "data - by day"
@@ -1226,8 +1435,16 @@ function getReportCampaigns(cfg) {
           if (from && d < from) return;
           if (to && d > to) return;
         }
-        var cname = idx.campaignName !== -1 ? r[idx.campaignName] : '';
-        if (cname) set[String(cname).trim()] = true;
+        var cname = idx.campaignName !== -1 ? String(r[idx.campaignName] || '').trim() : '';
+        if (!cname) return;
+        var rowAccId = idx.accountId !== -1 ? String(r[idx.accountId] || '').trim() : '';
+        var rowAccName = idx.accountName !== -1 ? String(r[idx.accountName] || '').trim() : '';
+        if (rowAccId || rowAccName) {
+          if (!rowMatchesAccounts_(rowAccId, rowAccName, effectiveAccounts)) return;
+        } else if (!allowUnknownForSuperAdmin) {
+          return;
+        }
+        set[cname] = true;
       });
     }
   }
@@ -1240,16 +1457,27 @@ function getReportCampaigns(cfg) {
 // but grouped by AD SET (each ad set is treated as a "campaign" internally so we
 // reuse aggregateByCampaign_ + buildSummary_ unchanged). campaignName is REQUIRED
 // (single-campaign view). Also returns campaignList for the picker.
-function getAdSetData(campaignName, filters) {
+function getAdSetData(campaignName, filters, sessionToken) {
   filters = filters || {};
+  var auth = requireAuth_(resolveSessionToken_(sessionToken, filters));
+  if (!auth.ok) {
+    return {
+      authError: true, error: auth.error,
+      accounts: [], rows: [], campaigns: [], campaignList: [], summary: emptySummary_()
+    };
+  }
+  var allowedAccounts = getAllowedAccountObjects_(auth.user);
+  var effectiveAccounts = enforceAccountScope_(filters, auth.user);
+  var allowUnknownForSuperAdmin = isUnfilteredSuperAdmin_(filters, auth.user);
+
   try {
     var sheet = getAdSetSpreadsheet_().getSheetByName('data - adset - by day');
     if (!sheet) {
-      return { rows: [], campaigns: [], campaignList: [], summary: emptySummary_(),
+      return { accounts: allowedAccounts, rows: [], campaigns: [], campaignList: [], summary: emptySummary_(),
                error: 'Sheet "data - adset - by day" not found. Add it, then run backfillAdSetHistory().' };
     }
     var range = sheet.getDataRange().getValues();
-    if (range.length < 2) return { rows: [], campaigns: [], campaignList: [], summary: emptySummary_(), error: null };
+    if (range.length < 2) return { accounts: allowedAccounts, rows: [], campaigns: [], campaignList: [], summary: emptySummary_(), error: null };
 
     var headerRowIdx = findHeaderRow_(range);
     var headers = range[headerRowIdx];
@@ -1268,11 +1496,14 @@ function getAdSetData(campaignName, filters) {
       var allClicks = d.impressions > 0 ? d.impressions * (ctrAllRaw / 100) : 0;
       var dateStr = toDateString(g('reportingEnds'));
       var adset = String(g('adSetName') || '').trim() || '(unnamed ad set)';
+      var realCamp = String(g('campaignName') || '').trim();
       return {
         accountId: String(g('accountId') || '').trim(),
         accountName: String(g('accountName') || '').trim(),
         campaignName: adset,                                   // relabel: group by ad set
-        _realCampaign: String(g('campaignName') || '').trim(),
+        _groupKey: adset + '\u0000' + realCamp,
+        _displayName: adset,
+        _realCampaign: realCamp,
         objective: String(g('objective') || '').trim() || 'Unknown',
         bidStrategy: String(g('bidStrategy') || '').trim(),
         reportingEnds: dateStr, reportingEndsTs: tsOf(dateStr),
@@ -1296,12 +1527,12 @@ function getAdSetData(campaignName, filters) {
       return row.campaignName !== '(unnamed ad set)' || row.spent || row.results || row.reach;
     });
 
-    var selectedAccounts = filters.accountIds || (filters.accountId ? [filters.accountId] : []);
-    if (selectedAccounts.length > 0 && selectedAccounts.indexOf('ALL') === -1) {
-      rows = rows.filter(function (r) {
-        return r.accountId && selectedAccounts.indexOf(r.accountId) !== -1;
-      });
-    }
+    rows = rows.filter(function (r) {
+      if (r.accountId || r.accountName) {
+        return rowMatchesAccounts_(r.accountId, r.accountName, effectiveAccounts);
+      }
+      return allowUnknownForSuperAdmin;
+    });
 
     // distinct campaigns present (for the picker) — before the campaign filter
     var campSet = {};
@@ -1310,36 +1541,52 @@ function getAdSetData(campaignName, filters) {
 
     // date filters (optional)
     if (filters.dateFrom || filters.dateTo) {
-      var fromTs = filters.dateFrom ? new Date(filters.dateFrom).getTime() : -Infinity;
-      var toTs = filters.dateTo ? new Date(filters.dateTo).getTime() + 86399999 : Infinity;
-      rows = rows.filter(function (r) { return !isNaN(r.reportingEndsTs) && r.reportingEndsTs >= fromTs && r.reportingEndsTs <= toTs; });
+      var fromTs = filters.dateFrom ? tsOf(filters.dateFrom) : -Infinity;
+      var toTs = filters.dateTo ? (tsOf(filters.dateTo) + 86399999) : Infinity;
+      rows = rows.filter(function (r) {
+        if (isNaN(r.reportingEndsTs)) return false;
+        if (filters.dateFrom && !isNaN(fromTs) && r.reportingEndsTs < fromTs) return false;
+        if (filters.dateTo && !isNaN(toTs) && r.reportingEndsTs > toTs) return false;
+        return true;
+      });
     }
 
-    // REQUIRED single-campaign filter
+    // Optional single-campaign filter (empty = ALL Ad Sets across selected accounts)
     if (campaignName) rows = rows.filter(function (r) { return r._realCampaign === campaignName; });
-    else return { rows: [], campaigns: [], campaignList: campaignList, summary: emptySummary_(), error: null };
+
+    if (filters.objective) {
+      rows = rows.filter(function (r) { return r.objective === filters.objective; });
+    }
 
     if (filters.search) {
       var needle = String(filters.search).toLowerCase().trim();
       rows = rows.filter(function (r) {
         var matchAdSet = r.campaignName && r.campaignName.toLowerCase().indexOf(needle) !== -1;
         var matchCamp = r._realCampaign && r._realCampaign.toLowerCase().indexOf(needle) !== -1;
-        var matchAcc = r.accountName && r.accountName.toLowerCase().indexOf(needle) !== -1;
-        var matchAccId = r.accountId && r.accountId.toLowerCase().indexOf(needle) !== -1;
-        return matchAdSet || matchCamp || matchAcc || matchAccId;
+        return matchAdSet || matchCamp;
       });
     }
 
     var statusMap = getAdSetStatusMap_();
     var adsets = aggregateByCampaign_(rows, statusMap);
+    if (filters.roasMin !== '' && filters.roasMin != null) {
+      var rMin = parseFloat(filters.roasMin);
+      if (!isNaN(rMin)) {
+        adsets = adsets.filter(function (a) { return (a.roas || 0) >= rMin; });
+        var validAdSets = {};
+        adsets.forEach(function (a) { validAdSets[a.campaignName + '\u0000' + (a.realCampaignName || '')] = true; });
+        rows = rows.filter(function (r) { return validAdSets[r.campaignName + '\u0000' + (r._realCampaign || '')]; });
+      }
+    }
     var summary = buildSummary_(rows, adsets);
     return {
+      accounts: allowedAccounts,
       rows: rows, campaigns: adsets, campaignList: campaignList, summary: summary,
       generatedAt: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm'),
       error: null
     };
   } catch (e) {
-    return { rows: [], campaigns: [], campaignList: [], summary: emptySummary_(), error: e.message || String(e) };
+    return { accounts: allowedAccounts, rows: [], campaigns: [], campaignList: [], summary: emptySummary_(), error: e.message || String(e) };
   }
 }
 
@@ -1350,8 +1597,15 @@ function getAdSetData(campaignName, filters) {
 // with include_archived:true, this dropdown otherwise lists every campaign Meta ever ran
 // on this account, including long-paused/archived ones — exactly what made it hard to
 // search. Returns totalCampaigns too, so the frontend can show "(N of M)".
-function getAdSetCampaigns(filters) {
+function getAdSetCampaigns(filters, sessionToken) {
   filters = filters || {};
+  var auth = requireAuth_(resolveSessionToken_(sessionToken, filters));
+  if (!auth.ok) {
+    return { authError: true, error: auth.error, campaigns: [], totalCampaigns: 0 };
+  }
+  var effectiveAccounts = enforceAccountScope_(filters, auth.user);
+  var allowUnknownForSuperAdmin = isUnfilteredSuperAdmin_(filters, auth.user);
+
   var sheet = getAdSetSpreadsheet_().getSheetByName('data - adset - by day');
   if (!sheet) return { campaigns: [], totalCampaigns: 0 };
   var range = sheet.getDataRange().getValues();
@@ -1360,18 +1614,18 @@ function getAdSetCampaigns(filters) {
   var idx = resolveHeaders(range[headerRowIdx]);
   if (idx.campaignName === -1) return { campaigns: [], totalCampaigns: 0 };
 
-  var selectedAccounts = filters.accountIds || (filters.accountId ? [filters.accountId] : []);
-  var filterAccount = selectedAccounts.length > 0 && selectedAccounts.indexOf('ALL') === -1;
-
-  var fromTs = filters.dateFrom ? new Date(filters.dateFrom).getTime() : -Infinity;
-  var toTs = filters.dateTo ? new Date(filters.dateTo).getTime() + 86399999 : Infinity;
+  var fromTs = filters.dateFrom ? tsOf(filters.dateFrom) : -Infinity;
+  var toTs = filters.dateTo ? (tsOf(filters.dateTo) + 86399999) : Infinity;
   var activeOnly = !!filters.activeOnly;
 
   var all = {}, active = {};
   range.slice(headerRowIdx + 1).forEach(function (r) {
-    if (filterAccount && idx.accountId !== -1) {
-      var acc = String(r[idx.accountId] || '').trim();
-      if (acc && selectedAccounts.indexOf(acc) === -1) return;
+    var acc = idx.accountId !== -1 ? String(r[idx.accountId] || '').trim() : '';
+    var accName = idx.accountName !== -1 ? String(r[idx.accountName] || '').trim() : '';
+    if (acc || accName) {
+      if (!rowMatchesAccounts_(acc, accName, effectiveAccounts)) return;
+    } else if (!allowUnknownForSuperAdmin) {
+      return;
     }
     var c = String(r[idx.campaignName] || '').trim();
     if (!c) return;
@@ -1406,14 +1660,24 @@ function getAdSetStatusMap_() {
 
 // ── NEW: Ad-set-level Placement / Age×Gender breakdown for the toggleable widgets ──
 // breakdownType: 'placement' | 'agegender'
-function getAdSetBreakdownData(campaignName, breakdownType, filters) {
+function getAdSetBreakdownData(campaignName, breakdownType, filters, sessionToken) {
   filters = filters || {};
+  var auth = requireAuth_(resolveSessionToken_(sessionToken, filters));
+  if (!auth.ok) {
+    return { authError: true, error: auth.error, rows: [] };
+  }
+  var effectiveAccounts = enforceAccountScope_(filters, auth.user);
+  var allowUnknownForSuperAdmin = isUnfilteredSuperAdmin_(filters, auth.user);
+
   var sheetName = breakdownType === 'agegender' ? ADSET_AGEGENDER_SHEET_ : ADSET_PLACEMENT_SHEET_;
   var sheet = getAdSetSpreadsheet_().getSheetByName(sheetName);
   if (!sheet) return { rows: [], error: 'Sheet "' + sheetName + '" not found. Run backfillAdSetBreakdownHistory() first.' };
 
   var data = sheet.getDataRange().getValues();
   if (data.length < 2) return { rows: [] };
+
+  var hIdx = resolveHeaders(data[0] || []);
+  var campMapState = { source: 'adset', fallbackSource: 'campaign', map: null, fallbackMap: null };
 
   var from = filters.dateFrom ? new Date(filters.dateFrom) : null;
   var to = filters.dateTo ? new Date(filters.dateTo) : null;
@@ -1425,8 +1689,14 @@ function getAdSetBreakdownData(campaignName, breakdownType, filters) {
     var d = new Date(r[0]);
     if (from && d < from) return;
     if (to && d > to) return;
-    var cname = String(r[1] || '');
+    var cname = hIdx.campaignName !== -1 ? String(r[hIdx.campaignName] || '').trim() : String(r[1] || '').trim();
     if (campaignName && cname !== campaignName) return;
+
+    var rowAccId = hIdx.accountId !== -1 ? String(r[hIdx.accountId] || '').trim() : '';
+    var rowAccName = hIdx.accountName !== -1 ? String(r[hIdx.accountName] || '').trim() : '';
+    if (!isRowAuthorizedForScope_(rowAccId, rowAccName, cname, effectiveAccounts, allowUnknownForSuperAdmin, campMapState)) {
+      return;
+    }
 
     if (breakdownType === 'agegender') {
       // [date, campaign, adset, age, gender, spend, impressions, clicks, reach, purchases, purchaseValue]
@@ -1492,16 +1762,27 @@ function getAdSetBreakdownData(campaignName, breakdownType, filters) {
 //     no dedicated A/B comparison UI yet — a reasonable v2 if you want it.
 // ═══════════════════════════════════════════════════════════════════════════
 
-function getAdData(filters) {
+function getAdData(filters, sessionToken) {
   filters = filters || {};
+  var auth = requireAuth_(resolveSessionToken_(sessionToken, filters));
+  if (!auth.ok) {
+    return {
+      authError: true, error: auth.error,
+      accounts: [], ads: [], campaignList: [], adsetList: [], summary: emptySummary_()
+    };
+  }
+  var allowedAccounts = getAllowedAccountObjects_(auth.user);
+  var effectiveAccounts = enforceAccountScope_(filters, auth.user);
+  var allowUnknownForSuperAdmin = isUnfilteredSuperAdmin_(filters, auth.user);
+
   try {
     var sheet = getAdSpreadsheet_().getSheetByName('data - ad - by day');
     if (!sheet) {
-      return { ads: [], campaignList: [], adsetList: [], summary: emptySummary_(),
+      return { accounts: allowedAccounts, ads: [], campaignList: [], adsetList: [], summary: emptySummary_(),
                error: 'Sheet "data - ad - by day" not found. Add it, then run backfillAdHistory() (see AdPipeline.gs).' };
     }
     var range = sheet.getDataRange().getValues();
-    if (range.length < 2) return { ads: [], campaignList: [], adsetList: [], summary: emptySummary_(), error: null };
+    if (range.length < 2) return { accounts: allowedAccounts, ads: [], campaignList: [], adsetList: [], summary: emptySummary_(), error: null };
 
     var headerRowIdx = findHeaderRow_(range);
     var headers = range[headerRowIdx];
@@ -1554,12 +1835,12 @@ function getAdData(filters) {
       return row._adName !== '(unnamed ad)' || row.spent || row.results || row.reach;
     });
 
-    var selectedAccounts = filters.accountIds || (filters.accountId ? [filters.accountId] : []);
-    if (selectedAccounts.length > 0 && selectedAccounts.indexOf('ALL') === -1) {
-      rows = rows.filter(function (r) {
-        return r.accountId && selectedAccounts.indexOf(r.accountId) !== -1;
-      });
-    }
+    rows = rows.filter(function (r) {
+      if (r.accountId || r.accountName) {
+        return rowMatchesAccounts_(r.accountId, r.accountName, effectiveAccounts);
+      }
+      return allowUnknownForSuperAdmin;
+    });
 
     // distinct campaigns present (for the picker) — before any filtering
     var campSetAll = {};
@@ -1568,9 +1849,14 @@ function getAdData(filters) {
 
     // date filters (optional)
     if (filters.dateFrom || filters.dateTo) {
-      var fromTs = filters.dateFrom ? new Date(filters.dateFrom).getTime() : -Infinity;
-      var toTs = filters.dateTo ? new Date(filters.dateTo).getTime() + 86399999 : Infinity;
-      rows = rows.filter(function (r) { return !isNaN(r.reportingEndsTs) && r.reportingEndsTs >= fromTs && r.reportingEndsTs <= toTs; });
+      var fromTs = filters.dateFrom ? tsOf(filters.dateFrom) : -Infinity;
+      var toTs = filters.dateTo ? (tsOf(filters.dateTo) + 86399999) : Infinity;
+      rows = rows.filter(function (r) {
+        if (isNaN(r.reportingEndsTs)) return false;
+        if (filters.dateFrom && !isNaN(fromTs) && r.reportingEndsTs < fromTs) return false;
+        if (filters.dateTo && !isNaN(toTs) && r.reportingEndsTs > toTs) return false;
+        return true;
+      });
     }
     // campaign filter (optional) — narrows BEFORE computing the ad-set list, so that
     // dropdown scopes itself to whatever campaign is currently chosen
@@ -1651,13 +1937,14 @@ function getAdData(filters) {
 
     var summary = buildSummary_(rows, ads);
     return {
+      accounts: allowedAccounts,
       ads: ads, campaignList: campaignList, adsetList: adsetList, summary: summary,
       creativeTypeCounts: creativeTypeCounts,
       generatedAt: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm'),
       error: null
     };
   } catch (e) {
-    return { ads: [], campaignList: [], adsetList: [], summary: emptySummary_(), error: e.message || String(e) };
+    return { accounts: allowedAccounts, ads: [], campaignList: [], adsetList: [], summary: emptySummary_(), error: e.message || String(e) };
   }
 }
 

@@ -105,6 +105,10 @@ function getAdHeaders_() {
 // a failed fetch NEVER clears existing rows, so a bad day self-heals within LOOKBACK_DAYS
 // once the underlying issue clears, and you get an email if it doesn't.
 var AD_MAIN_FAIL_STREAK_PROP_ = 'AD_MAIN_IMPORT_FAIL_STREAK';
+var AD_IMPORT_TIME_BUDGET_MS_ = 240000;   // 4 min soft budget when importAdData() runs standalone
+var AD_BACKFILL_TIME_BUDGET_MS_ = 270000; // 4.5 min soft budget for backfillAdData()
+var AD_INSIGHTS_INITIAL_CHUNK_DAYS_ = 2;  // level=ad + time_increment=1 + include_archived=true is heavy; chunk by 2 days proactively
+var AD_INSIGHTS_LIMIT_STEPS_ = [200, 100, 50];
 
 // See the matching comment on importAdSetData() (AdSetPipeline.gs) — this trigger's
 // error rate can't come from the graceful result.ok path below (that never throws), so it
@@ -112,26 +116,48 @@ var AD_MAIN_FAIL_STREAK_PROP_ = 'AD_MAIN_IMPORT_FAIL_STREAK';
 // the next one actually surfaces instead of just incrementing a percentage on the
 // Triggers page with no explanation.
 function importAdData() {
+  importAdDataCore_(Date.now() + AD_IMPORT_TIME_BUDGET_MS_);
+}
+
+function importAdDataWithBudget_(deadlineMs) {
+  importAdDataCore_(deadlineMs || (Date.now() + AD_IMPORT_TIME_BUDGET_MS_));
+}
+
+function importAdDataCore_(deadlineMs) {
   try {
     var sheet = getAdSheet_();
     ensureAdHeaders_(sheet);
     var until = getYesterday();
     var since = getDateNDaysAgo_(LOOKBACK_DAYS);
-    var result = fetchAdRows_(since, until);
+    var result = fetchAdRows_(since, until, { deadlineMs: deadlineMs });
 
-    if (!result.ok) {
+    if (!result.ok && !result.partialOk) {
       var streak = bumpFailStreak_(AD_MAIN_FAIL_STREAK_PROP_);
       Logger.log('importAdData: fetch failed (' + result.errorMessage + ') for ' + since + '..' + until +
         ' — leaving existing rows untouched. Fail streak: ' + streak + ' day(s). Retries automatically tomorrow.');
       if (streak >= LOOKBACK_DAYS) alertAdImportFailing_(streak, result.errorMessage);
       return;
     }
-    resetFailStreak_(AD_MAIN_FAIL_STREAK_PROP_);
 
-    removeAdRowsInRange_(sheet, since, until);
-    appendAdRowsSafe_(sheet, result.rows);
-    Logger.log('importAdData: ' + result.rows.length + ' rows for ' + since + '..' + until);
-    markPipelineRefreshed_('ads');
+    if (result.partialOk) {
+      // Some accounts succeeded and some failed/hit time budget: update ONLY succeeded
+      // accounts so we never silently wipe rows belonging to failed accounts.
+      removeAdRowsInRange_(sheet, since, until, result.succeededAccountIds);
+      appendAdRowsSafe_(sheet, result.rows);
+      var partialStreak = bumpFailStreak_(AD_MAIN_FAIL_STREAK_PROP_);
+      var failedNames = (result.failedAccounts || []).map(function (f) { return f.name; }).join(', ');
+      Logger.log('⚠️ importAdData: partial success — wrote ' + result.rows.length + ' rows for ' +
+        Object.keys(result.succeededAccountIds || {}).length + ' account(s) in ' + since + '..' + until +
+        '; preserved existing rows for failed/skipped account(s): [' + failedNames + '] (' + result.errorMessage +
+        '). Fail streak: ' + partialStreak + ' day(s).');
+      if (partialStreak >= LOOKBACK_DAYS) alertAdImportFailing_(partialStreak, result.errorMessage);
+    } else {
+      resetFailStreak_(AD_MAIN_FAIL_STREAK_PROP_);
+      removeAdRowsInRange_(sheet, since, until);
+      appendAdRowsSafe_(sheet, result.rows);
+      Logger.log('importAdData: ' + result.rows.length + ' rows for ' + since + '..' + until);
+      markPipelineRefreshed_('ads');
+    }
 
     // Stage 2 fast-path (Sep 2026, "creatives are stale/Unknown for up to several days"):
     // see the syncNewAdsFastPath_() header comment below for the full rationale. Wrapped
@@ -210,11 +236,11 @@ function backfillAdHistory() {
 function backfillAdData(sinceStr, untilStr) {
   var sheet = getAdSheet_();
   ensureAdHeaders_(sheet);
-  backfillAdRange_(sheet, sinceStr, untilStr);
+  backfillAdRange_(sheet, sinceStr, untilStr, Date.now() + AD_BACKFILL_TIME_BUDGET_MS_);
 }
 
-function backfillAdRange_(sheet, sinceStr, untilStr) {
-  var result = fetchAdRows_(sinceStr, untilStr);
+function backfillAdRange_(sheet, sinceStr, untilStr, deadlineMs) {
+  var result = fetchAdRows_(sinceStr, untilStr, { deadlineMs: deadlineMs });
   if (result.ok) {
     removeAdRowsInRange_(sheet, sinceStr, untilStr);
     appendAdRowsSafe_(sheet, result.rows);
@@ -222,69 +248,239 @@ function backfillAdRange_(sheet, sinceStr, untilStr) {
     return;
   }
 
-  var since = new Date(sinceStr), until = new Date(untilStr);
-  var spanDays = Math.round((until.getTime() - since.getTime()) / 86400000) + 1;
-  if (spanDays <= 1) {
-    // Can't split a single day any further — this is either a genuine outage or one
-    // unusually heavy day (huge ad count). Existing rows are left untouched either way.
-    Logger.log('backfillAdData ' + sinceStr + '..' + untilStr + ': still failing at 1-day granularity (' +
-      result.errorMessage + ') — existing rows left untouched. Check View > Executions for the exact ' +
-      'error text; if it\'s the same "reduce the amount of data" family, this single day itself has more ' +
-      'ad-rows than Meta will return in one response (rare) — otherwise it\'s a real outage, re-run later.');
+  if (result.partialOk) {
+    removeAdRowsInRange_(sheet, sinceStr, untilStr, result.succeededAccountIds);
+    appendAdRowsSafe_(sheet, result.rows);
+    var failedNames = (result.failedAccounts || []).map(function (f) { return f.name; }).join(', ');
+    Logger.log('backfillAdData ' + sinceStr + '..' + untilStr + ': partial success (' + result.rows.length +
+      ' rows written for succeeded accounts; failed accounts [' + failedNames + '] left untouched — ' + result.errorMessage + ').');
     return;
   }
 
-  var midOffset = Math.floor((spanDays - 1) / 2);
-  var mid = new Date(since.getTime() + midOffset * 86400000);
-  var firstEnd = dayKey_(mid);
-  var secondStart = dayKey_(new Date(mid.getTime() + 86400000));
-  Logger.log('backfillAdData ' + sinceStr + '..' + untilStr + ': failed as one request (' + result.errorMessage +
-    ') — very likely Meta\'s "reduce the amount of data" limit, not a rate-limit hiccup (identical retries ' +
-    'don\'t fix it). Splitting into ' + sinceStr + '..' + firstEnd + ' and ' + secondStart + '..' + untilStr + '.');
-  Utilities.sleep(1000);
-  backfillAdRange_(sheet, sinceStr, firstEnd);
-  Utilities.sleep(1000);
-  backfillAdRange_(sheet, secondStart, untilStr);
+  Logger.log('backfillAdData ' + sinceStr + '..' + untilStr + ': failed (' + result.errorMessage +
+    ') — existing rows left untouched. Re-run this window to retry.');
 }
 
-// ── FETCH (level=ad, daily, paginated) with retry ──
-// Returns { rows, ok, errorMessage } — same reasoning as fetchAdSetRows_ in
-// AdSetPipeline.gs: callers must be able to tell "genuinely no data" from "the fetch
-// broke partway", so a bad day never silently wipes good existing rows.
-function fetchAdRows_(sinceStr, untilStr) {
-  var accounts = (typeof AD_ACCOUNTS !== 'undefined' && AD_ACCOUNTS.length) ? AD_ACCOUNTS : [{ id: (typeof ACCOUNT_ID !== 'undefined' ? ACCOUNT_ID : ''), name: 'Default' }];
-  var out = [], anySuccess = false, lastError = '';
+// ── UTC DATE HELPERS FOR SAFE CHUNKING (independent of Script timezone) ──
+function parseUtcDateMs_(dateStr) {
+  var m = String(dateStr || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return NaN;
+  return Date.UTC(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10));
+}
 
-  for (var i = 0; i < accounts.length; i++) {
-    var acc = accounts[i];
-    var settings = fetchCampaignSettings(acc.id);
+function formatUtcDate_(utcMs) {
+  var d = new Date(utcMs);
+  var y = d.getUTCFullYear();
+  var m = d.getUTCMonth() + 1;
+  var day = d.getUTCDate();
+  return y + '-' + (m < 10 ? '0' + m : String(m)) + '-' + (day < 10 ? '0' + day : String(day));
+}
+
+function diffDaysInclusive_(sinceStr, untilStr) {
+  var s = parseUtcDateMs_(sinceStr);
+  var u = parseUtcDateMs_(untilStr);
+  if (isNaN(s) || isNaN(u) || u < s) return 0;
+  return Math.round((u - s) / 86400000) + 1;
+}
+
+function buildDateChunks_(sinceStr, untilStr, chunkDays) {
+  var s = parseUtcDateMs_(sinceStr);
+  var u = parseUtcDateMs_(untilStr);
+  if (isNaN(s) || isNaN(u) || u < s) return [];
+  var step = Math.max(1, chunkDays || 1);
+  var chunks = [];
+  var cur = s;
+  while (cur <= u) {
+    var end = Math.min(u, cur + (step - 1) * 86400000);
+    chunks.push({ since: formatUtcDate_(cur), until: formatUtcDate_(end) });
+    cur = end + 86400000;
+  }
+  return chunks;
+}
+
+function nextSmallerAdLimit_(currentLimit) {
+  for (var i = 0; i < AD_INSIGHTS_LIMIT_STEPS_.length; i++) {
+    if (AD_INSIGHTS_LIMIT_STEPS_[i] < currentLimit) return AD_INSIGHTS_LIMIT_STEPS_[i];
+  }
+  return null;
+}
+
+function shouldAdaptAdQueryError_(err) {
+  if (!err) return false;
+  if (typeof isAccountRateLimited_ === 'function' && isAccountRateLimited_(err)) return false;
+  if (typeof isQueryOverloadMetaError_ === 'function' && isQueryOverloadMetaError_(err)) return true;
+  if (err.code === 1 || err.code === 2) return true;
+  var msg = String(err.message || '').toLowerCase();
+  return msg.indexOf('reduce the amount of data') !== -1 ||
+         msg.indexOf('unknown error') !== -1 ||
+         msg.indexOf('timeout') !== -1 ||
+         msg.indexOf('timed out') !== -1;
+}
+
+function fetchAdRowsForAccount_(acc, settings, sinceStr, untilStr, opts) {
+  opts = opts || {};
+  var deadlineMs = opts.deadlineMs || 0;
+  var initialChunkDays = opts.chunkDays || AD_INSIGHTS_INITIAL_CHUNK_DAYS_;
+  var initialLimit = opts.initialLimit || AD_INSIGHTS_LIMIT_STEPS_[0];
+  var minLimit = AD_INSIGHTS_LIMIT_STEPS_[AD_INSIGHTS_LIMIT_STEPS_.length - 1];
+
+  var state = {
+    chunkDays: Math.max(1, initialChunkDays),
+    limit: initialLimit
+  };
+
+  var queue = buildDateChunks_(sinceStr, untilStr, state.chunkDays).map(function (c) {
+    return { since: c.since, until: c.until, limit: state.limit };
+  });
+
+  var accRows = [];
+  var base = 'https://graph.facebook.com/v18.0/' + acc.id + '/insights';
+
+  while (queue.length > 0) {
+    if (deadlineMs && Date.now() >= deadlineMs) {
+      return { ok: false, rows: [], errorMessage: 'Soft time budget reached' };
+    }
+
+    var seg = queue.shift();
+    var spanDays = diffDaysInclusive_(seg.since, seg.until);
+    if (spanDays <= 0) continue;
+
+    // Apply any tightened per-account limits learned from an earlier segment.
+    if (spanDays > state.chunkDays) {
+      var subChunks = buildDateChunks_(seg.since, seg.until, state.chunkDays).map(function (c) {
+        return { since: c.since, until: c.until, limit: Math.min(seg.limit, state.limit) };
+      });
+      queue = subChunks.concat(queue);
+      continue;
+    }
+
+    var reqLimit = Math.min(seg.limit, state.limit);
     var params = {
       level: 'ad',
       time_increment: 1,
       include_archived: true,
       fields: 'ad_id,ad_name,adset_name,' + INSIGHT_FIELDS_,
-      time_range: JSON.stringify({ since: sinceStr, until: untilStr }),
-      limit: 500
+      time_range: JSON.stringify({ since: seg.since, until: seg.until }),
+      limit: reqLimit
     };
     var qs = Object.keys(params).map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(String(params[k])); }).join('&');
-    var base = 'https://graph.facebook.com/v18.0/' + acc.id + '/insights';
 
+    var canFallback = (spanDays > 1) || (reqLimit > minLimit);
+    var retryOpts = { failFastOnOverload: canFallback, deadlineMs: deadlineMs };
     var next = null;
+    var segRows = [];
+    var segErr = null;
+
     do {
-      var url = next ? next : base + '?' + qs;
-      var data = fetchWithRetry_(url);
+      if (deadlineMs && Date.now() >= deadlineMs) {
+        return { ok: false, rows: [], errorMessage: 'Soft time budget reached' };
+      }
+      var url = next ? next : (base + '?' + qs);
+      var data = fetchWithRetry_(url, canFallback ? 3 : 2, retryOpts);
       if (!data || data.error) {
-        lastError = (data && data.error) ? JSON.stringify(data.error) : 'no response from fetchWithRetry_';
-        Logger.log('ad insights error for ' + acc.name + ': ' + lastError);
+        segErr = (data && data.error) ? data.error : { message: 'no response from fetchWithRetry_' };
         break;
       }
-      anySuccess = true;
-      (data.data || []).forEach(function (item) { out.push(buildAdRow_(item, settings, acc)); });
+      (data.data || []).forEach(function (item) { segRows.push(buildAdRow_(item, settings, acc)); });
       next = (data.paging && data.paging.next) ? data.paging.next : null;
-      if (next) Utilities.sleep(200);
+      if (next) Utilities.sleep(150);
     } while (next);
+
+    if (!segErr) {
+      Array.prototype.push.apply(accRows, segRows);
+      continue;
+    }
+
+    var errText = JSON.stringify(segErr);
+    if (typeof isAccountRateLimited_ === 'function' && isAccountRateLimited_(segErr)) {
+      Logger.log('ad insights rate-limited for ' + acc.name + ' (' + seg.since + '..' + seg.until + '): ' + errText);
+      return { ok: false, rows: [], errorMessage: errText };
+    }
+
+    if (shouldAdaptAdQueryError_(segErr)) {
+      if (spanDays > 1) {
+        var sMs = parseUtcDateMs_(seg.since);
+        var midOffset = Math.floor((spanDays - 1) / 2);
+        var midMs = sMs + midOffset * 86400000;
+        var firstEnd = formatUtcDate_(midMs);
+        var secondStart = formatUtcDate_(midMs + 86400000);
+        state.chunkDays = Math.min(state.chunkDays, Math.max(1, Math.floor(spanDays / 2)));
+        Logger.log('ad insights overload for ' + acc.name + ' (' + seg.since + '..' + seg.until +
+          ', limit=' + reqLimit + '): ' + errText + ' — splitting into ' +
+          seg.since + '..' + firstEnd + ' & ' + secondStart + '..' + seg.until +
+          ' (new chunkDays=' + state.chunkDays + ').');
+        queue = [
+          { since: seg.since, until: firstEnd, limit: reqLimit },
+          { since: secondStart, until: seg.until, limit: reqLimit }
+        ].concat(queue);
+        Utilities.sleep(300);
+        continue;
+      }
+
+      var smallerLimit = nextSmallerAdLimit_(reqLimit);
+      if (smallerLimit) {
+        state.limit = smallerLimit;
+        Logger.log('ad insights overload for ' + acc.name + ' (' + seg.since + ', limit=' + reqLimit +
+          '): ' + errText + ' — reducing limit to ' + smallerLimit + '.');
+        queue = [{ since: seg.since, until: seg.until, limit: smallerLimit }].concat(queue);
+        Utilities.sleep(300);
+        continue;
+      }
+    }
+
+    Logger.log('ad insights error for ' + acc.name + ' (' + seg.since + '..' + seg.until + ', limit=' + reqLimit + '): ' + errText);
+    return { ok: false, rows: [], errorMessage: errText };
   }
-  return { rows: out, ok: anySuccess || out.length > 0 || !lastError, errorMessage: lastError };
+
+  return { ok: true, rows: accRows, errorMessage: '' };
+}
+
+// ── FETCH (level=ad, daily, paginated) with proactive chunking & adaptive fallback ──
+// Returns { rows, ok, partialOk, succeededAccountIds, failedAccounts, errorMessage } —
+// callers can safely replace ONLY succeeded accounts on partial runs without wiping
+// existing rows for failed/timed-out accounts.
+function fetchAdRows_(sinceStr, untilStr, opts) {
+  opts = opts || {};
+  var accounts = (typeof AD_ACCOUNTS !== 'undefined' && AD_ACCOUNTS.length) ? AD_ACCOUNTS : [{ id: (typeof ACCOUNT_ID !== 'undefined' ? ACCOUNT_ID : ''), name: 'Default' }];
+  var out = [];
+  var succeededAccountIds = {};
+  var succeededCount = 0;
+  var failedAccounts = [];
+  var lastError = '';
+
+  for (var i = 0; i < accounts.length; i++) {
+    var acc = accounts[i];
+    if (opts.deadlineMs && Date.now() >= opts.deadlineMs) {
+      lastError = 'Soft time budget reached before account ' + acc.name;
+      Logger.log('fetchAdRows_: ' + lastError + ' — preserving existing rows for remaining ' + (accounts.length - i) + ' account(s).');
+      for (var j = i; j < accounts.length; j++) {
+        failedAccounts.push({ id: accounts[j].id, name: accounts[j].name, error: lastError });
+      }
+      break;
+    }
+
+    var settings = fetchCampaignSettings(acc.id);
+    var accRes = fetchAdRowsForAccount_(acc, settings, sinceStr, untilStr, opts);
+    if (accRes.ok) {
+      Array.prototype.push.apply(out, accRes.rows);
+      succeededAccountIds[acc.id] = true;
+      succeededCount++;
+    } else {
+      lastError = accRes.errorMessage || 'Unknown ad insights error';
+      failedAccounts.push({ id: acc.id, name: acc.name, error: lastError });
+    }
+  }
+
+  var allOk = failedAccounts.length === 0;
+  var partialOk = !allOk && succeededCount > 0;
+  return {
+    rows: out,
+    ok: allOk,
+    partialOk: partialOk,
+    succeededAccountIds: succeededAccountIds,
+    failedAccounts: failedAccounts,
+    errorMessage: lastError
+  };
 }
 
 function buildAdRow_(item, campaignSettings, acc) {
@@ -470,8 +666,9 @@ function ensureAdHeaders_(sheet) {
   if (blank || !matches) sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
 }
 
-// Date lives in column 8 ("Reporting ends") — index 7 — in the ad-level layout.
-function removeAdRowsInRange_(sheet, sinceStr, untilStr) {
+// Date lives in column 10 ("Reporting ends") — index 9 — in the multi-account ad-level layout.
+// When accountIdSet is provided, only removes rows in [sinceStr, untilStr] belonging to those accounts.
+function removeAdRowsInRange_(sheet, sinceStr, untilStr, accountIdSet) {
   var last = sheet.getLastRow();
   if (last < 2) return;
   var lastCol = sheet.getLastColumn();
@@ -479,6 +676,10 @@ function removeAdRowsInRange_(sheet, sinceStr, untilStr) {
   var s = new Date(sinceStr).getTime();
   var u = new Date(untilStr).getTime() + 86399999;
   var kept = vals.filter(function (r) {
+    if (accountIdSet) {
+      var rowAccId = String(r[0] || '').trim();
+      if (!accountIdSet[rowAccId]) return true;
+    }
     var ts = new Date(dayKey_(r[9])).getTime();
     if (isNaN(ts)) return true;
     return !(ts >= s && ts <= u);

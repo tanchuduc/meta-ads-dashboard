@@ -44,7 +44,7 @@ var BREAKDOWN_CONFIGS_ = {
 var BREAKDOWN_HEADERS_PIPELINE_ = [
   'Date', 'Campaign name', 'Breakdown Value', 'Spend', 'Impressions',
   'Clicks', 'Reach', 'CTR', 'Purchases', 'Purchase value',
-  'Video 3s', 'Video 100%', 'Link clicks'
+  'Video 3s', 'Video 100%', 'Link clicks', 'Account ID', 'Account Name'
 ];
 
 /**
@@ -59,7 +59,18 @@ function getOrCreateBreakdownSheet_(sheetName) {
   ensureColumns_(sheet, BREAKDOWN_HEADERS_PIPELINE_.length);
   var firstRow = sheet.getRange(1, 1, 1, BREAKDOWN_HEADERS_PIPELINE_.length).getValues()[0];
   var blank = firstRow.every(function (c) { return String(c).trim() === ''; });
-  if (blank || String(firstRow[0]).trim() !== 'Date') {
+  var lastExpected = BREAKDOWN_HEADERS_PIPELINE_[BREAKDOWN_HEADERS_PIPELINE_.length - 1];
+  var prevLastExpected = BREAKDOWN_HEADERS_PIPELINE_[BREAKDOWN_HEADERS_PIPELINE_.length - 2];
+  var headerNeedsUpdate = blank ||
+    String(firstRow[0] || '').trim() !== 'Date' ||
+    String(firstRow[BREAKDOWN_HEADERS_PIPELINE_.length - 2] || '').trim() !== prevLastExpected ||
+    String(firstRow[BREAKDOWN_HEADERS_PIPELINE_.length - 1] || '').trim() !== lastExpected;
+  if (headerNeedsUpdate) {
+    var col0 = String(firstRow[0] || '').trim();
+    var looksLikeDataRow = firstRow[0] instanceof Date || /^\d{4}-\d{2}-\d{2}/.test(col0);
+    if (looksLikeDataRow) {
+      sheet.insertRowBefore(1);
+    }
     sheet.getRange(1, 1, 1, BREAKDOWN_HEADERS_PIPELINE_.length).setValues([BREAKDOWN_HEADERS_PIPELINE_]);
   }
   return sheet;
@@ -109,7 +120,7 @@ function appendBreakdownRowsSafe_(sheet, rows) {
 /**
  * Kéo dữ liệu Breakdown cho 1 dimension cụ thể qua Meta Marketing API
  */
-function fetchBreakdownRowsForAccount_(accountId, sinceStr, untilStr, breakdownType) {
+function fetchBreakdownRowsForAccount_(accountId, accountName, sinceStr, untilStr, breakdownType) {
   var cfg = BREAKDOWN_CONFIGS_[breakdownType];
   if (!cfg) return { rows: [], ok: false, errorMessage: 'Invalid breakdown type: ' + breakdownType };
 
@@ -173,7 +184,9 @@ function fetchBreakdownRowsForAccount_(accountId, sinceStr, untilStr, breakdownT
         purchaseValue,
         video3s,
         video100,
-        linkClicks
+        linkClicks,
+        accountId || '',
+        accountName || ''
       ]);
     });
 
@@ -201,7 +214,7 @@ function importOneBreakdownRange_(breakdownType, sinceStr, untilStr) {
 
   accounts.forEach(function (acc) {
     Logger.log('Breakdown [' + breakdownType + '] -> ' + acc.name + ' (' + acc.id + ') ' + sinceStr + '..' + untilStr);
-    var res = fetchBreakdownRowsForAccount_(acc.id, sinceStr, untilStr, breakdownType);
+    var res = fetchBreakdownRowsForAccount_(acc.id, acc.name, sinceStr, untilStr, breakdownType);
     if (!res.ok) {
       hasErrors = true;
       Logger.log('  ⚠️ Lỗi fetch tài khoản ' + acc.name + ': ' + res.errorMessage);
