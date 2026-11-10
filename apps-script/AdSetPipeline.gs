@@ -55,13 +55,15 @@ var ADSET_SHEET_ID = '[ADSET_SHEET_ID]'; // Ad Set workbook — do NOT put the C
 var ADSET_SHEET_ID_PROP_ = 'ADSET_SHEET_ID_OVERRIDE'; // set by createNewYearAdSetWorkbook(), read here first
 
 function getAdSetSpreadsheet_() {
-  var override = PropertiesService.getScriptProperties().getProperty(ADSET_SHEET_ID_PROP_);
+  var override = PropertiesService.getScriptProperties().getProperty(ADSET_SHEET_ID_PROP_) ||
+                 PropertiesService.getScriptProperties().getProperty('ADSET_SHEET_ID') ||
+                 (typeof getAdSetSheetId_ === 'function' ? getAdSetSheetId_() : null);
   var id = override || ADSET_SHEET_ID;
-  if (!id || id === 'YOUR_ADSET_SPREADSHEET_ID') {
-    throw new Error('ADSET_SHEET_ID is not set in AdSetPipeline.gs. Put the Ad Set workbook\'s ID there.');
+  if (!id || id === 'YOUR_ADSET_SPREADSHEET_ID' || id === '[ADSET_SHEET_ID]') {
+    throw new Error('ADSET_SHEET_ID chưa được cài đặt. Hãy chạy hàm initSetupGoogleSheets() trong file Config.gs trước.');
   }
   var ss = SpreadsheetApp.openById(id);
-  if (!ss) throw new Error('Could not open the Ad Set workbook (id ' + id + '). Check the ID and that this account can access it.');
+  if (!ss) throw new Error('Không thể mở Ad Set workbook (id ' + id + '). Hãy kiểm tra quyền truy cập.');
   return ss;
 }
 

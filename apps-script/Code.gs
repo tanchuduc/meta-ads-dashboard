@@ -54,6 +54,8 @@ function norm(s) {
 }
 
 const FIELD_ALIASES = {
+  accountId:       ['accountid', 'account_id', 'idtaikhoan'],
+  accountName:     ['accountname', 'account_name', 'tentaikhoan'],
   campaignName:    ['campaignname'],
   adSetName:       ['adsetname', 'adset', 'adsetName'],
   objective:       ['objective'],
@@ -203,6 +205,8 @@ function getDashboardData(filters) {
       const allClicks = d.impressions > 0 ? d.impressions * (ctrAllRaw / 100) : 0;
       const dateStr = toDateString(g('reportingEnds'));
       return {
+        accountId: String(g('accountId') || '').trim(),
+        accountName: String(g('accountName') || '').trim(),
         campaignName: String(g('campaignName') || '').trim() || '(unnamed)',
         objective: String(g('objective') || '').trim() || 'Unknown',
         bidStrategy: String(g('bidStrategy') || '').trim(),
@@ -252,6 +256,9 @@ function getDashboardData(filters) {
 
     // 1) row-level filters
     let filteredRows = rows.filter(function (row) {
+      if (filters.accountId && filters.accountId !== 'ALL') {
+        if (row.accountId && row.accountId !== filters.accountId) return false;
+      }
       if (filters.search) {
         if (row.campaignName.toLowerCase().indexOf(String(filters.search).toLowerCase()) === -1) return false;
       }
@@ -289,6 +296,7 @@ function getDashboardData(filters) {
     const summary = buildSummary_(finalRows, campaigns);
 
     return {
+      accounts: (typeof AD_ACCOUNTS !== 'undefined' ? AD_ACCOUNTS : []),
       rows: finalRows,
       campaigns: campaigns,
       summary: summary,
@@ -808,20 +816,19 @@ function fetchTodayLiveAdsFromMeta_(dateStr) {
 
 // ── SHEET ACCESS ──────────────────────────────────────────────────────────────
 function getSheet_() {
+  var id = (typeof getCampaignSheetId_ === 'function' ? getCampaignSheetId_() : null) || SHEET_ID;
   var ss;
-  if (SHEET_ID && SHEET_ID !== 'YOUR_SPREADSHEET_ID') {
-    ss = SpreadsheetApp.openById(SHEET_ID);
+  if (id && id !== 'YOUR_SPREADSHEET_ID' && id !== '[SHEET_ID]') {
+    ss = SpreadsheetApp.openById(id);
   } else {
     ss = SpreadsheetApp.getActiveSpreadsheet();
   }
   if (!ss) {
-    throw new Error('No spreadsheet resolved. Put a real SHEET_ID in Code.gs, or attach this script to your sheet (Extensions → Apps Script).');
+    throw new Error('Chưa kết nối Google Sheet. Hãy chạy hàm initSetupGoogleSheets() trong file Config.gs trước.');
   }
   var sheet = ss.getSheetByName(SHEET_NAME);
   if (!sheet) {
-    var names = ss.getSheets().map(function (sh) { return '"' + sh.getName() + '"'; });
-    throw new Error('Tab "' + SHEET_NAME + '" not found. This spreadsheet has: ' + names.join(', ') +
-      '. Set SHEET_NAME in Code.gs to match one of these EXACTLY (capitalization and spaces count).');
+    sheet = ss.insertSheet(SHEET_NAME);
   }
   return sheet;
 }

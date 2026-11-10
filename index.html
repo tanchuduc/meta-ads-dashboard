@@ -625,7 +625,23 @@
     </svg>
     <div class="logo-text">
       <h1><i class="fa-brands fa-meta" style="color:var(--meta-blue)"></i> Meta Ads Dashboard</h1>
-      <span>Acme Co &middot; Campaign Performance</span>
+      <span>Quản lý Đa Tài Khoản &middot; Performance Analytics</span>
+    </div>
+    <div class="account-selector-wrap" style="margin-left:24px;display:flex;flex-direction:column;">
+      <label style="font-size:10px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">
+        <i class="fa-brands fa-meta" style="color:var(--meta-blue)"></i> Chọn Tài khoản Quảng cáo
+      </label>
+      <select id="globalAccountSelect" onchange="onAccountSelectChange(this.value)" style="padding:6px 12px;font-size:13px;font-weight:600;border-radius:8px;border:1.5px solid var(--meta-blue);background:var(--card-bg);color:var(--text-primary);cursor:pointer;outline:none;min-width:240px;box-shadow:var(--shadow);">
+        <option value="ALL">🌟 Tất cả tài khoản (8 TKQC)</option>
+        <option value="act_988452388193871">Alpha 1 GMT +7 20tr - Hoa</option>
+        <option value="act_3863604326993604">TKQC Alpha 2 GMT-7- Hoa</option>
+        <option value="act_140020454941995">Alpha 5 GMT -7 - Tấn</option>
+        <option value="act_856434001679007">Alpha 3 GMT-3 MKT AB - Thảo</option>
+        <option value="act_1855997818105694">Alpha 6 - GMT -3 - Tấn</option>
+        <option value="act_542081774682636">Alpha 7 - GMT-3 - HTXB - Phương</option>
+        <option value="act_848982799482573">Alpha 8 - GMT-4 (11h) - MKT Sống</option>
+        <option value="act_2929843193813956">TKQC MED - Alpha 10 GMT +7 (0h)</option>
+      </select>
     </div>
   </div>
   <div class="header-right">
@@ -747,7 +763,7 @@
   </div>
   <div class="filters-row" style="margin-top:10px">
     <label style="display:flex;align-items:center;gap:6px;font-weight:500;cursor:pointer;font-size:13px">
-      <input type="checkbox" id="adsActiveOnly" style="width:auto" onchange="loadAdsData()"> Spending only (hide ads with ₱0 spend in range)
+      <input type="checkbox" id="adsActiveOnly" style="width:auto" onchange="loadAdsData()"> Spending only (hide ads with 0 ₫ spend in range)
     </label>
     <label style="display:flex;align-items:center;gap:6px;font-weight:500;cursor:pointer;font-size:13px">
       <input type="checkbox" id="adsWinnersOnly" style="width:auto" onchange="loadAdsData()"> Winners only
@@ -1027,7 +1043,7 @@
   function loadLS(key, dflt){ try{ var v=JSON.parse(localStorage.getItem(key)); if(v && v.length){ return v; } }catch(e){} return dflt.slice(); }
   function saveLS(key, val){ try{ localStorage.setItem(key, JSON.stringify(val)); }catch(e){} }
   function num(v){ return Number(v)||0; }
-  function peso(n){ return '₱' + num(n).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  function peso(n){ return Math.round(num(n)).toLocaleString('vi-VN') + ' ₫'; }
   function compact(n){
     n = num(n);
     try { return n.toLocaleString('en-US',{notation:'compact',maximumFractionDigits:1}); }
@@ -1257,7 +1273,7 @@
       var palette = ['#0866FF','#F2545B','#31A24C','#8B5CF6','#F0A020','#00B7C3','#EC4899'];
       trendChart = new Chart(document.getElementById('trendChart').getContext('2d'), {
         type:'pie',
-        data:{ labels:labels, datasets:[{ label:'Spend (₱)', data:spend, backgroundColor:labels.map(function(_,i){return palette[i%palette.length];}), borderWidth:2, borderColor:'#fff' }] },
+        data:{ labels:labels, datasets:[{ label:'Chi tiêu (₫)', data:spend, backgroundColor:labels.map(function(_,i){return palette[i%palette.length];}), borderWidth:2, borderColor:'#fff' }] },
         options:{ responsive:true, maintainAspectRatio:false,
           plugins:{ legend:{position:'bottom',labels:{usePointStyle:true,padding:10,font:{family:"'Inter',sans-serif",size:10}}},
             tooltip:{callbacks:{label:function(c){ return c.label+': '+peso(c.parsed); }}}} }
@@ -1267,7 +1283,7 @@
     note.style.display = 'none';
 
     var datasets = [
-      { label:'Spend (₱)', data:spend, borderColor:'#F2545B', backgroundColor:'rgba(242,84,91,.15)', borderWidth:2, tension:.35, fill:trendType==='line', yAxisID:'y' },
+      { label:'Chi tiêu (₫)', data:spend, borderColor:'#F2545B', backgroundColor:'rgba(242,84,91,.15)', borderWidth:2, tension:.35, fill:trendType==='line', yAxisID:'y' },
       { label:'Results', data:results, borderColor:'#0866FF', backgroundColor:'rgba(8,102,255,.15)', borderWidth:2, tension:.35, fill:false, yAxisID:'y1' }
     ];
     var chartType = trendType, chartOpts = {};
@@ -1281,7 +1297,7 @@
       options:{ responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
         plugins:{ legend:{labels:{usePointStyle:true,font:{family:"'Inter',sans-serif"}}},
           tooltip:{callbacks:{label:function(c){ var v=c.parsed.y; return c.dataset.label+': '+(c.datasetIndex===0?peso(v):compact(v)); }}}},
-        scales:{ y:{position:'left',ticks:{callback:function(v){return '₱'+compact(v);}},grid:{color:'rgba(0,0,0,.05)'}},
+        scales:{ y:{position:'left',ticks:{callback:function(v){return compact(v)+' ₫';}},grid:{color:'rgba(0,0,0,.05)'}},
           y1:{position:'right',ticks:{callback:function(v){return compact(v);}},grid:{drawOnChartArea:false}},
           x:{grid:{display:false}} } }
     });
@@ -1304,8 +1320,23 @@
   }
 
   function readFilters(){
-    return { search:val('filterSearch'), dateFrom:val('filterDateFrom'), dateTo:val('filterDateTo'),
-             roasMin:val('filterRoasMin'), objective:val('filterObjective') };
+    return {
+      accountId: val('globalAccountSelect') || 'ALL',
+      search: val('filterSearch'),
+      dateFrom: val('filterDateFrom'),
+      dateTo: val('filterDateTo'),
+      roasMin: val('filterRoasMin'),
+      objective: val('filterObjective')
+    };
+  }
+  function onAccountSelectChange(accId){
+    applyFilters();
+    if (typeof loadAdSetData === 'function' && document.getElementById('adsetBar').style.display !== 'none') {
+      loadAdSetData();
+    }
+    if (typeof loadAdsData === 'function' && document.getElementById('adsBar').style.display !== 'none') {
+      loadAdsData();
+    }
   }
   function val(id){ var el=document.getElementById(id); return el?el.value:''; }
   function applyFilters(){
@@ -2230,7 +2261,7 @@
     ['placementSpendChart','placementCtrChart','placementRoasChart'].forEach(function(id){ if(placementCharts[id]) placementCharts[id].destroy(); });
     placementCharts.placementSpendChart = new Chart(document.getElementById('placementSpendChart').getContext('2d'), {
       type:'bar', data:{ labels:labels, datasets:[{ data:rows.map(function(r){return Math.round(r.spend);}), backgroundColor:palette, borderRadius:4 }] },
-      options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return peso(c.parsed.x);}}}}, scales:{x:{ticks:{callback:function(v){return '₱'+compact(v);}}}} }
+      options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return peso(c.parsed.x);}}}}, scales:{x:{ticks:{callback:function(v){return compact(v)+' ₫';}}}} }
     });
     placementCharts.placementCtrChart = new Chart(document.getElementById('placementCtrChart').getContext('2d'), {
       type:'bar', data:{ labels:labels, datasets:[{ data:rows.map(function(r){return Number((r.ctr||0).toFixed(2));}), backgroundColor:palette, borderRadius:4 }] },

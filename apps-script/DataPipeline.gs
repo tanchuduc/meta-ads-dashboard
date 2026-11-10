@@ -74,7 +74,9 @@ function generalizeResults_(item, optimizationGoal, purchaseCount, thruplayCount
 }
 
 // One shared row builder so daily + backfill produce IDENTICAL columns.
-function buildRowFromInsight_(item, campaignSettings) {
+function buildRowFromInsight_(item, campaignSettings, acc) {
+  var accId = acc ? acc.id : (item.account_id || '');
+  var accName = acc ? acc.name : (item.account_name || '');
   var av = av_; // local alias, keeps the body below unchanged
   var roasValue = (item.purchase_roas && item.purchase_roas.length) ? (parseFloat(item.purchase_roas[0].value) || 0) : 0;
   var videoPlays      = av(item.actions, 'video_view');
@@ -134,43 +136,45 @@ function buildRowFromInsight_(item, campaignSettings) {
   var hookRate = impressions > 0 ? (videoPlays / impressions) * 100 : 0;
   var holdRate = videoPlays > 0 ? (thruplays / videoPlays) * 100 : 0;
 
-  // 35 columns, in the exact order of the "data - by day" header row
+  // 37 columns: Account ID, Account Name, followed by the campaign fields
   return [
-    name,                                  // 1  Campaign name
-    item.objective || '',                  // 2  Objective
-    item.attribution_setting || '',        // 3  Attribution setting
-    st.bid_strategy || '',                 // 4  Campaign bid strategy
-    item.date_stop || '',                  // 5  Reporting ends
-    st.daily_budget || 0,                  // 6  Daily budget
-    item.engagement_rate_ranking || '',    // 7  Engagement rate ranking
-    item.quality_ranking || '',            // 8  Quality ranking
-    frequency,                             // 9  Frequency
-    parseFloat(item.cpm) || 0,             // 10 CPM
-    parseInt(item.reach) || 0,             // 11 Reach
-    results,                               // 12 Results (NOW optimization-goal-aware)
-    blockedContacts,                       // 13 Blocked messaging contacts
-    parseFloat(item.spend) || 0,           // 14 Amount spent
-    videoPlays,                            // 15 Video plays
-    postEngagements,                       // 16 Post engagements
-    ctrAll,                                // 17 CTR (all)
-    ctrLink,                               // 18 CTR (link click-through rate)
-    videoPlays,                            // 19 3-second video plays (= video_view)
-    video25,                               // 20 Video plays at 25%
-    video50,                               // 21 Video plays at 50%
-    video75,                               // 22 Video plays at 75%
-    video95,                               // 23 Video plays at 95%
-    video100,                              // 24 Video plays at 100%
-    costPerMessage,                        // 25 Cost per messaging conversation started
-    roasValue,                             // 26 Purchase ROAS
-    conversionValue,                       // 27 Purchases conversion value
-    purchases,                             // 28 Purchases (STILL purchases-only, on purpose)
-    item.conversion_rate_ranking || '',    // 29 Conversion rate ranking
-    hookRate,                              // 30 Hook rate
-    holdRate,                              // 31 Hold rate
-    optimizationGoal,                      // 32 Optimization goal            ← NEW
-    landingPageViews,                      // 33 Landing page views          ← NEW
-    initiateCheckouts,                     // 34 Initiate checkouts          ← NEW
-    thruplays                              // 35 ThruPlays (15-sec plays)    ← NEW
+    accId,                                 // 0  Account ID
+    accName,                               // 1  Account Name
+    name,                                  // 2  Campaign name
+    item.objective || '',                  // 3  Objective
+    item.attribution_setting || '',        // 4  Attribution setting
+    st.bid_strategy || '',                 // 5  Campaign bid strategy
+    item.date_stop || '',                  // 6  Reporting ends
+    st.daily_budget || 0,                  // 7  Daily budget
+    item.engagement_rate_ranking || '',    // 8  Engagement rate ranking
+    item.quality_ranking || '',            // 9  Quality ranking
+    frequency,                             // 10 Frequency
+    parseFloat(item.cpm) || 0,             // 11 CPM
+    parseInt(item.reach) || 0,             // 12 Reach
+    results,                               // 13 Results (NOW optimization-goal-aware)
+    blockedContacts,                       // 14 Blocked messaging contacts
+    parseFloat(item.spend) || 0,           // 15 Amount spent
+    videoPlays,                            // 16 Video plays
+    postEngagements,                       // 17 Post engagements
+    ctrAll,                                // 18 CTR (all)
+    ctrLink,                               // 19 CTR (link click-through rate)
+    videoPlays,                            // 20 3-second video plays (= video_view)
+    video25,                               // 21 Video plays at 25%
+    video50,                               // 22 Video plays at 50%
+    video75,                               // 23 Video plays at 75%
+    video95,                               // 24 Video plays at 95%
+    video100,                              // 25 Video plays at 100%
+    costPerMessage,                        // 26 Cost per messaging conversation started
+    roasValue,                             // 27 Purchase ROAS
+    conversionValue,                       // 28 Purchases conversion value
+    purchases,                             // 29 Purchases (STILL purchases-only, on purpose)
+    item.conversion_rate_ranking || '',    // 30 Conversion rate ranking
+    hookRate,                              // 31 Hook rate
+    holdRate,                              // 32 Hold rate
+    optimizationGoal,                      // 33 Optimization goal
+    landingPageViews,                      // 34 Landing page views
+    initiateCheckouts,                     // 35 Initiate checkouts
+    thruplays                              // 36 ThruPlays (15-sec plays)
   ];
 }
 
@@ -190,16 +194,8 @@ function fetchOptions_() {
 }
 
 // ── HEADERS for test-fb / "data - by day" ──
-// FIXED (Aug 2026, per your go-ahead to touch campaign-level bugs): unlike the Ad Set
-// sheet (ensureAdSetHeaders_) and every breakdown sheet (ensureBreakdownHeaders_), these
-// two campaign sheets never had a headers array or a self-healing header check — row 1
-// was assumed to already be typed in by hand from before this pipeline existed. Every
-// column added to buildRowFromInsight_() since then (Hook rate, Hold rate, Optimization
-// goal, Landing page views, Initiate checkouts, ThruPlays) landed data in columns 30-35
-// with nothing above it in row 1. This is the SAME 35-column shape ADSET_HEADERS_
-// (AdSetPipeline.gs) uses, minus its leading "Ad set name" column — buildRowFromInsight_
-// is the shared row builder for both, so keep these two lists in sync if either changes.
 var CAMPAIGN_HEADERS_ = [
+  'Account ID', 'Account Name',
   'Campaign name', 'Objective', 'Attribution setting', 'Campaign bid strategy',
   'Reporting ends', 'Daily budget', 'Engagement rate ranking', 'Quality ranking', 'Frequency',
   'CPM (cost per 1,000 impressions)', 'Reach', 'Results', 'Blocked messaging contacts', 'Amount spent',
@@ -224,46 +220,51 @@ function ensureCampaignHeaders_(sheet) {
 
 // ── DAILY IMPORT (trigger: ~midnight–1am) → writes YESTERDAY to test-fb ──
 function importDataFromJSON() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = (typeof getSheet_ === 'function') ? getSheet_().getParent() : SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName('test-fb');
-  if (!sheet) { Logger.log('test-fb not found'); return; }
+  if (!sheet) sheet = ss.insertSheet('test-fb');
   ensureCampaignHeaders_(sheet);
 
   var until = getYesterday();
   var since = getDateNDaysAgo_(LOOKBACK_DAYS);   // rolling window: last LOOKBACK_DAYS ending yesterday
-  var campaignSettings = fetchCampaignSettings();
+  
+  var accounts = (typeof AD_ACCOUNTS !== 'undefined' && AD_ACCOUNTS.length) ? AD_ACCOUNTS : [{ id: (typeof ACCOUNT_ID !== 'undefined' ? ACCOUNT_ID : ''), name: 'Default' }];
+  var rows = [];
 
-  var params = {
-    level: 'campaign',
-    time_increment: 1,             // one row per campaign PER DAY across the window (required for multi-day)
-    include_archived: true,
-    fields: INSIGHT_FIELDS_,
-    time_range: JSON.stringify({ since: since, until: until }),
-    limit: 500
-  };
-  var qs = Object.keys(params).map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(String(params[k])); }).join('&');
-  var base = 'https://graph.facebook.com/v18.0/' + ACCOUNT_ID + '/insights';
+  accounts.forEach(function (acc) {
+    var campaignSettings = fetchCampaignSettings(acc.id);
+    var params = {
+      level: 'campaign',
+      time_increment: 1,             // one row per campaign PER DAY across the window (required for multi-day)
+      include_archived: true,
+      fields: INSIGHT_FIELDS_,
+      time_range: JSON.stringify({ since: since, until: until }),
+      limit: 500
+    };
+    var qs = Object.keys(params).map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(String(params[k])); }).join('&');
+    var base = 'https://graph.facebook.com/v18.0/' + acc.id + '/insights';
 
-  // fetch (paginated — a multi-day window can exceed one page)
-  var rows = [], nextPage = null;
-  do {
-    var url = nextPage ? nextPage : (base + '?' + qs);
-    try {
-      var resp = UrlFetchApp.fetch(url, fetchOptions_());
-      var data = JSON.parse(resp.getContentText());
-      if (data.error) { Logger.log('importDataFromJSON API error: ' + JSON.stringify(data.error)); return; }
-      (data.data || []).forEach(function (item) { rows.push(buildRowFromInsight_(item, campaignSettings)); });
-      nextPage = (data.paging && data.paging.next) ? data.paging.next : null;
-      Utilities.sleep(150);
-    } catch (e) {
-      Logger.log('importDataFromJSON fetch error: ' + e.message);
-      return;                       // bail without touching data - by day; next run re-pulls the window
-    }
-  } while (nextPage);
+    // fetch (paginated — a multi-day window can exceed one page)
+    var nextPage = null;
+    do {
+      var url = nextPage ? nextPage : (base + '?' + qs);
+      try {
+        var resp = UrlFetchApp.fetch(url, fetchOptions_());
+        var data = JSON.parse(resp.getContentText());
+        if (data.error) { Logger.log('importDataFromJSON API error (' + acc.name + '): ' + JSON.stringify(data.error)); break; }
+        (data.data || []).forEach(function (item) { rows.push(buildRowFromInsight_(item, campaignSettings, acc)); });
+        nextPage = (data.paging && data.paging.next) ? data.paging.next : null;
+        Utilities.sleep(150);
+      } catch (e) {
+        Logger.log('importDataFromJSON fetch error (' + acc.name + '): ' + e.message);
+        break;
+      }
+    } while (nextPage);
+  });
 
-  // overwrite test-fb with the fresh window (35 cols now)
-  ensureColumns_(sheet, 35);
-  if (sheet.getLastRow() > 1) sheet.getRange(2, 1, sheet.getLastRow() - 1, 35).clearContent();
+  // overwrite test-fb with the fresh window (37 cols now)
+  ensureColumns_(sheet, CAMPAIGN_HEADERS_.length);
+  if (sheet.getLastRow() > 1) sheet.getRange(2, 1, sheet.getLastRow() - 1, CAMPAIGN_HEADERS_.length).clearContent();
   if (rows.length) {
     var need = 1 + rows.length;
     if (need > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), need - sheet.getMaxRows());
@@ -552,8 +553,8 @@ function copyDataOnceADay(sinceStr, untilStr) {
   if (srcLast < 2) { Logger.log('copyDataOnceADay: test-fb empty'); return; }
 
   ensureCampaignHeaders_(dest);
-  ensureColumns_(dest, 35);
-  var data = src.getRange(2, 1, srcLast - 1, 35).getValues().filter(function (r) {
+  ensureColumns_(dest, CAMPAIGN_HEADERS_.length);
+  var data = src.getRange(2, 1, srcLast - 1, CAMPAIGN_HEADERS_.length).getValues().filter(function (r) {
     return r.join('').trim() !== '';
   });
   if (!data.length) { Logger.log('copyDataOnceADay: nothing to copy'); return; }
@@ -562,7 +563,7 @@ function copyDataOnceADay(sinceStr, untilStr) {
   if (!sinceStr || !untilStr) {
     var minTs = Infinity, maxTs = -Infinity;
     data.forEach(function (r) {
-      var ts = new Date(dayKey_(r[4])).getTime();
+      var ts = new Date(dayKey_(r[6])).getTime();
       if (!isNaN(ts)) { if (ts < minTs) minTs = ts; if (ts > maxTs) maxTs = ts; }
     });
     if (minTs !== Infinity) { sinceStr = dayKey_(new Date(minTs)); untilStr = dayKey_(new Date(maxTs)); }
@@ -577,17 +578,10 @@ function copyDataOnceADay(sinceStr, untilStr) {
   dest.getRange(start, 1, data.length, data[0].length).setValues(data);
 
   Logger.log('copyDataOnceADay: upserted ' + data.length + ' rows for ' + sinceStr + '..' + untilStr);
-  // Sep 2026, "let users know if dashboard data is fresh or stale" — stamped ONLY here, at
-  // the exact point "data - by day" (what the dashboard actually reads) was genuinely
-  // rewritten — not in importDataFromJSON() itself, which can succeed at the fetch step and
-  // still fail to reach this point (e.g. "a sheet is missing"). markPipelineRefreshed_ is a
-  // shared helper (defined in AdSetPipeline.gs alongside the other fail-streak helpers).
-  markPipelineRefreshed_('campaigns');
+  if (typeof markPipelineRefreshed_ === 'function') markPipelineRefreshed_('campaigns');
 }
 
 // ── SHARED HELPERS ──
-// Timezone-safe: uses the script's timezone (Manila), NOT UTC. This is the only
-// getYesterday() the project should have — delete any copies in other files.
 function getYesterday() {
   var d = new Date();
   d.setDate(d.getDate() - 1);
@@ -606,7 +600,7 @@ function ensureColumns_(sheet, n) {
   if (max < n) sheet.insertColumnsAfter(max, n - max);
 }
 
-function keyOf_(row) { return String(row[0]).trim() + '||' + dayKey_(row[4]); } // campaign || date
+function keyOf_(row) { return String(row[0]).trim() + '||' + String(row[2]).trim() + '||' + dayKey_(row[6]); } // account || campaign || date
 
 function dayKey_(v) {
   if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
@@ -623,7 +617,7 @@ function removeRowsInDateRange_(sheet, sinceStr, untilStr) {
   var sinceTs = new Date(sinceStr).getTime();
   var untilTs = new Date(untilStr).getTime() + 86399999;
   var kept = values.filter(function (row) {
-    var k = dayKey_(row[4]);        // col 5 = Reporting ends
+    var k = dayKey_(row[6]);        // col 7 = Reporting ends
     var ts = new Date(k).getTime();
     if (isNaN(ts)) return true;     // keep undated rows
     return !(ts >= sinceTs && ts <= untilTs);

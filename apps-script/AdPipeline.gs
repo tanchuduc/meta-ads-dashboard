@@ -54,13 +54,15 @@ var AD_SHEET_ID = '[AD_SHEET_ID]'; // ← create a NEW Google Sheet for Ads and 
 var AD_SHEET_ID_PROP_ = 'AD_SHEET_ID_OVERRIDE'; // set by a future createNewYearAdWorkbook(), read here first
 
 function getAdSpreadsheet_() {
-  var override = PropertiesService.getScriptProperties().getProperty(AD_SHEET_ID_PROP_);
+  var override = PropertiesService.getScriptProperties().getProperty(AD_SHEET_ID_PROP_) ||
+                 PropertiesService.getScriptProperties().getProperty('AD_SHEET_ID') ||
+                 (typeof getAdSheetId_ === 'function' ? getAdSheetId_() : null);
   var id = override || AD_SHEET_ID;
-  if (!id || id === 'YOUR_AD_SPREADSHEET_ID') {
-    throw new Error('AD_SHEET_ID is not set in AdPipeline.gs. Create a new Google Sheet for Ad-level data and put its ID there — see the SETUP comment at the top of this file.');
+  if (!id || id === 'YOUR_AD_SPREADSHEET_ID' || id === '[AD_SHEET_ID]') {
+    throw new Error('AD_SHEET_ID chưa được cài đặt. Hãy chạy hàm initSetupGoogleSheets() trong file Config.gs trước.');
   }
   var ss = SpreadsheetApp.openById(id);
-  if (!ss) throw new Error('Could not open the Ads workbook (id ' + id + '). Check the ID and that this account can access it.');
+  if (!ss) throw new Error('Không thể mở Ads workbook (id ' + id + '). Hãy kiểm tra quyền truy cập.');
   return ss;
 }
 
