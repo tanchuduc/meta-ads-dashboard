@@ -158,6 +158,34 @@ function tsOf(dateStr) {
   return isNaN(t) ? NaN : t;
 }
 
+function buildDateRangeBounds_(filters) {
+  var fromTs = (filters && filters.dateFrom) ? tsOf(filters.dateFrom) : -Infinity;
+  var toTs = (filters && filters.dateTo) ? (tsOf(filters.dateTo) + 86399999) : Infinity;
+  return {
+    hasFilter: !!(filters && (filters.dateFrom || filters.dateTo)),
+    hasFrom: !!(filters && filters.dateFrom && !isNaN(fromTs)),
+    hasTo: !!(filters && filters.dateTo && !isNaN(toTs)),
+    fromTs: fromTs,
+    toTs: toTs
+  };
+}
+
+function isDateInBounds_(dateVal, bounds) {
+  if (!bounds || !bounds.hasFilter) return true;
+  var t = tsOf(dateVal);
+  if (isNaN(t)) return false;
+  if (bounds.hasFrom && t < bounds.fromTs) return false;
+  if (bounds.hasTo && t > bounds.toTs) return false;
+  return true;
+}
+
+function normalizeSingleAccountId_(id) {
+  var s = String(id || '').trim();
+  if (!s) return '';
+  if (/^\d+$/.test(s)) return 'act_' + s;
+  return s;
+}
+
 function normalizeAccountFilterList_(filters) {
   var list = (filters && filters.accountIds && filters.accountIds.length)
     ? filters.accountIds
@@ -174,15 +202,25 @@ function rowMatchesAccounts_(rowAccId, rowAccName, selectedAccounts) {
   }
   var id = String(rowAccId || '').trim();
   if (id) {
-    return selectedAccounts.indexOf(id) !== -1;
+    var normId = normalizeSingleAccountId_(id);
+    if (selectedAccounts.indexOf(id) !== -1 || selectedAccounts.indexOf(normId) !== -1) {
+      return true;
+    }
+    if (id.indexOf('act_') === 0 && selectedAccounts.indexOf(id.slice(4)) !== -1) {
+      return true;
+    }
+    return false;
   }
   // Fallback cho các dòng dữ liệu cũ chưa có cột Account ID: đối chiếu theo tên tài khoản trong AD_ACCOUNTS
   var name = String(rowAccName || '').trim().toLowerCase();
   if (name && typeof AD_ACCOUNTS !== 'undefined' && AD_ACCOUNTS.length) {
     for (var i = 0; i < AD_ACCOUNTS.length; i++) {
-      if (selectedAccounts.indexOf(AD_ACCOUNTS[i].id) !== -1 &&
-          String(AD_ACCOUNTS[i].name || '').trim().toLowerCase() === name) {
-        return true;
+      if (selectedAccounts.indexOf(AD_ACCOUNTS[i].id) !== -1) {
+        var fullName = String(AD_ACCOUNTS[i].name || '').trim().toLowerCase();
+        var shortName = String(AD_ACCOUNTS[i].shortName || '').trim().toLowerCase();
+        if (fullName === name || (shortName && shortName === name)) {
+          return true;
+        }
       }
     }
   }
@@ -190,7 +228,7 @@ function rowMatchesAccounts_(rowAccId, rowAccName, selectedAccounts) {
 }
 
 /**
- * Xây dựng bảng ánh xạ campaignName -> { accountId, accountName } từ sheet chính
+ * Xây dựng bảng ánh xạ campaignName -> [{ accountId, accountName }] từ sheet chính
  * ("data - by day" hoặc "data - adset - by day") để lọc dữ liệu lịch sử chưa có cột Account ID.
  */
 function buildCampaignAccountMap_(source) {
@@ -208,6 +246,7 @@ function buildCampaignAccountMap_(source) {
     var idx = resolveHeaders(data[hr]);
     if (idx.campaignName === -1) return map;
 
+    var seen = {};
     for (var i = hr + 1; i < data.length; i++) {
       var r = data[i];
       var cname = String(r[idx.campaignName] || '').trim();
@@ -215,9 +254,11 @@ function buildCampaignAccountMap_(source) {
       var accId = idx.accountId !== -1 ? String(r[idx.accountId] || '').trim() : '';
       var accName = idx.accountName !== -1 ? String(r[idx.accountName] || '').trim() : '';
       if (!accId && !accName) continue;
-      if (!map[cname] || (!map[cname].accountId && accId)) {
-        map[cname] = { accountId: accId, accountName: accName };
-      }
+      var entryKey = cname + '\u0000' + accId + '\u0000' + accName.toLowerCase();
+      if (seen[entryKey]) continue;
+      seen[entryKey] = true;
+      if (!map[cname]) map[cname] = [];
+      map[cname].push({ accountId: accId, accountName: accName });
     }
   } catch (e) {
     Logger.log('buildCampaignAccountMap_ (' + (source || 'campaign') + ') warning: ' + e.message);
@@ -230,26 +271,31 @@ function isRowAuthorizedForScope_(rowAccId, rowAccName, campaignName, effectiveA
   var accName = String(rowAccName || '').trim();
   var cname = String(campaignName || '').trim();
 
-  if (!accId && !accName && cname && campMapState) {
-    if (campMapState.map === null) {
-      campMapState.map = buildCampaignAccountMap_(campMapState.source || 'campaign');
-    }
-    var mapped = campMapState.map[cname];
-    if (!mapped && campMapState.fallbackSource) {
-      if (campMapState.fallbackMap === null) {
-        campMapState.fallbackMap = buildCampaignAccountMap_(campMapState.fallbackSource);
-      }
-      mapped = campMapState.fallbackMap[cname];
-    }
-    if (mapped) {
-      accId = mapped.accountId || '';
-      accName = mapped.accountName || '';
-    }
-  }
-
   if (accId || accName) {
     return rowMatchesAccounts_(accId, accName, effectiveAccounts);
   }
+
+  if (cname && campMapState) {
+    if (campMapState.map === null) {
+      campMapState.map = buildCampaignAccountMap_(campMapState.source || 'campaign');
+    }
+    var mappedList = campMapState.map[cname];
+    if ((!mappedList || !mappedList.length) && campMapState.fallbackSource) {
+      if (campMapState.fallbackMap === null) {
+        campMapState.fallbackMap = buildCampaignAccountMap_(campMapState.fallbackSource);
+      }
+      mappedList = campMapState.fallbackMap[cname];
+    }
+    if (mappedList && mappedList.length) {
+      for (var i = 0; i < mappedList.length; i++) {
+        if (rowMatchesAccounts_(mappedList[i].accountId, mappedList[i].accountName, effectiveAccounts)) {
+          return true;
+        }
+      }
+      return false;
+    }
+  }
+
   return !!allowUnknownForSuperAdmin;
 }
 
@@ -323,10 +369,15 @@ function getDashboardData(filters, sessionToken) {
       // compute a genuine weighted CTR (all) instead of silently reusing link clicks for it.
       const allClicks = d.impressions > 0 ? d.impressions * (ctrAllRaw / 100) : 0;
       const dateStr = toDateString(g('reportingEnds'));
+      const accIdStr = String(g('accountId') || '').trim();
+      const accNameStr = String(g('accountName') || '').trim();
+      const campNameStr = String(g('campaignName') || '').trim() || '(unnamed)';
       return {
-        accountId: String(g('accountId') || '').trim(),
-        accountName: String(g('accountName') || '').trim(),
-        campaignName: String(g('campaignName') || '').trim() || '(unnamed)',
+        accountId: accIdStr,
+        accountName: accNameStr,
+        campaignName: campNameStr,
+        _groupKey: (accIdStr || accNameStr || '') + '\u0000' + campNameStr,
+        _displayName: campNameStr,
         objective: String(g('objective') || '').trim() || 'Unknown',
         bidStrategy: String(g('bidStrategy') || '').trim(),
         reportingEnds: dateStr,
@@ -443,8 +494,8 @@ function getDashboardData(filters, sessionToken) {
 
     // keep only the rows belonging to surviving campaigns
     const survivors = {};
-    campaigns.forEach(function (c) { survivors[c.campaignName] = true; });
-    const finalRows = filteredRows.filter(function (row) { return survivors[row.campaignName]; });
+    campaigns.forEach(function (c) { survivors[c._groupKey || c.campaignName] = true; });
+    const finalRows = filteredRows.filter(function (row) { return survivors[row._groupKey || row.campaignName]; });
 
     const summary = buildSummary_(finalRows, campaigns);
 
@@ -489,7 +540,9 @@ function aggregateByCampaign_(rows, statusMap) {
     const displayName = row._displayName || row.campaignName;
     if (!map[key]) {
       map[key] = {
+        _groupKey: key,
         campaignName: displayName,
+        accountId: row.accountId || '',
         accountName: row.accountName || '',
         realCampaignName: row._realCampaign || '',
         objective: row.objective,
@@ -551,6 +604,7 @@ function aggregateByCampaign_(rows, statusMap) {
     if (row.dailyBudget > 0 && a.dailyBudget === 0) a.dailyBudget = row.dailyBudget;
     if (row.optimizationGoal && !a.optimizationGoal) a.optimizationGoal = row.optimizationGoal;
 
+    if (row.accountId && !a.accountId) a.accountId = row.accountId;
     if (row.accountName && !a.accountName) a.accountName = row.accountName;
     if (row._realCampaign && !a.realCampaignName) a.realCampaignName = row._realCampaign;
     if (!row.objective || a.objective === 'Unknown') a.objective = row.objective || a.objective;
@@ -606,7 +660,9 @@ function aggregateByCampaign_(rows, statusMap) {
     const status = (statusMap && (statusMap[a.campaignName] || statusMap[key])) || {};
 
     return {
+      _groupKey: a._groupKey || key,
       campaignName: a.campaignName,
+      accountId: a.accountId || '',
       accountName: a.accountName || '',
       realCampaignName: a.realCampaignName || '',
       objective: a.objective,
@@ -1148,18 +1204,14 @@ function getBreakdownData(breakdownType, filters, sessionToken) {
   var hIdx = resolveHeaders(headers);
   var rows = data.slice(1);
 
-  // Apply date filters if provided
-  var from = filters.dateFrom ? new Date(filters.dateFrom) : null;
-  var to = filters.dateTo ? new Date(filters.dateTo) : null;
-  if (to) to.setHours(23, 59, 59, 999);
+  // Apply date filters if provided (timezone-safe via tsOf / toDateString)
+  var dateBounds = buildDateRangeBounds_(filters);
 
   var campMapState = { source: 'campaign', map: null };
 
   var filtered = rows.filter(function(row) {
     if (!row[0]) return false;
-    var d = new Date(row[0]);
-    if (from && d < from) return false;
-    if (to && d > to) return false;
+    if (!isDateInBounds_(row[0], dateBounds)) return false;
 
     var rowAccId = hIdx.accountId !== -1 ? String(row[hIdx.accountId] || '').trim() : '';
     var rowAccName = hIdx.accountName !== -1 ? String(row[hIdx.accountName] || '').trim() : '';
@@ -1171,14 +1223,14 @@ function getBreakdownData(breakdownType, filters, sessionToken) {
   // default to 0 for old rows that predate the schema upgrade, harmless)
   var result = filtered.map(function(row) {
     return {
-      date: row[0],
+      date: toDateString(row[0]),
       campaignName: row[1],
       breakdownValue: row[2],
-      spend: row[3],
-      impressions: row[4],
-      clicks: row[5],
-      reach: row[6],
-      ctr: row[7],
+      spend: toNumber(row[3]),
+      impressions: toNumber(row[4]),
+      clicks: toNumber(row[5]),
+      reach: toNumber(row[6]),
+      ctr: toNumber(row[7]),
       purchases: toNumber(row[8]),
       purchaseValue: toNumber(row[9]),
       video3s: toNumber(row[10]),
@@ -1316,9 +1368,7 @@ function getCustomReport(cfg, sessionToken) {
 // runs regardless of source. Pulled out (Aug 2026) specifically to support archived-year
 // Report Builder without forking this logic into two copies that could drift apart.
 function aggregateBreakdownData_(data, cfg, dim, multiDimsRequested, authContext) {
-  var from = cfg.dateFrom ? new Date(cfg.dateFrom) : null;
-  var to = cfg.dateTo ? new Date(cfg.dateTo) : null;
-  if (to) to.setHours(23, 59, 59, 999);
+  var dateBounds = buildDateRangeBounds_(cfg);
   var campaign = (cfg.campaignName || '').trim();
   var targetCampaigns = (Array.isArray(cfg.campaignNames) && cfg.campaignNames.length)
     ? cfg.campaignNames.filter(Boolean)
@@ -1334,9 +1384,7 @@ function aggregateBreakdownData_(data, cfg, dim, multiDimsRequested, authContext
   var active = {}, agg = {};
   data.slice(1).forEach(function (r) {
     if (!r[0]) return;
-    var d = new Date(r[0]);
-    if (from && d < from) return;
-    if (to && d > to) return;
+    if (!isDateInBounds_(r[0], dateBounds)) return;
 
     var cname = hIdx.campaignName !== -1 ? String(r[hIdx.campaignName] || '').trim() : String(r[1] || '').trim();
     if (authContext) {
@@ -1418,9 +1466,7 @@ function getReportCampaigns(cfg, sessionToken) {
   if (!ss) return { campaigns: [] };
 
   var set = {};
-  var from = cfg.dateFrom ? new Date(cfg.dateFrom) : null;
-  var to = cfg.dateTo ? new Date(cfg.dateTo) : null;
-  if (to) to.setHours(23, 59, 59, 999);
+  var dateBounds = buildDateRangeBounds_(cfg);
   var campMapState = { source: 'campaign', map: null };
 
   var sheet = ss.getSheetByName(sheetName);
@@ -1429,9 +1475,7 @@ function getReportCampaigns(cfg, sessionToken) {
     var hIdx = resolveHeaders(data[0]);
     data.slice(1).forEach(function (r) {
       if (!r[0]) return;
-      var d = new Date(r[0]);
-      if (from && d < from) return;
-      if (to && d > to) return;
+      if (!isDateInBounds_(r[0], dateBounds)) return;
       var cname = hIdx.campaignName !== -1 ? String(r[hIdx.campaignName] || '').trim() : String(r[1] || '').trim();
       if (!cname) return;
       var rowAccId = hIdx.accountId !== -1 ? String(r[hIdx.accountId] || '').trim() : '';
@@ -1450,10 +1494,8 @@ function getReportCampaigns(cfg, sessionToken) {
       var idx = resolveHeaders(mData[hr]);
       mData.slice(hr + 1).forEach(function (r) {
         var dateVal = idx.reportingEnds !== -1 ? r[idx.reportingEnds] : null;
-        if (dateVal) {
-          var d = new Date(dateVal);
-          if (from && d < from) return;
-          if (to && d > to) return;
+        if (dateBounds.hasFilter) {
+          if (!dateVal || !isDateInBounds_(dateVal, dateBounds)) return;
         }
         var cname = idx.campaignName !== -1 ? String(r[idx.campaignName] || '').trim() : '';
         if (!cname) return;
@@ -1517,11 +1559,13 @@ function getAdSetData(campaignName, filters, sessionToken) {
       var dateStr = toDateString(g('reportingEnds'));
       var adset = String(g('adSetName') || '').trim() || '(unnamed ad set)';
       var realCamp = String(g('campaignName') || '').trim();
+      var accIdStr = String(g('accountId') || '').trim();
+      var accNameStr = String(g('accountName') || '').trim();
       return {
-        accountId: String(g('accountId') || '').trim(),
-        accountName: String(g('accountName') || '').trim(),
+        accountId: accIdStr,
+        accountName: accNameStr,
         campaignName: adset,                                   // relabel: group by ad set
-        _groupKey: adset + '\u0000' + realCamp,
+        _groupKey: (accIdStr || accNameStr || '') + '\u0000' + adset + '\u0000' + realCamp,
         _displayName: adset,
         _realCampaign: realCamp,
         objective: String(g('objective') || '').trim() || 'Unknown',
@@ -1615,8 +1659,8 @@ function getAdSetData(campaignName, filters, sessionToken) {
       if (!isNaN(rMin)) {
         adsets = adsets.filter(function (a) { return (a.roas || 0) >= rMin; });
         var validAdSets = {};
-        adsets.forEach(function (a) { validAdSets[a.campaignName + '\u0000' + (a.realCampaignName || '')] = true; });
-        rows = rows.filter(function (r) { return validAdSets[r.campaignName + '\u0000' + (r._realCampaign || '')]; });
+        adsets.forEach(function (a) { validAdSets[a._groupKey || ((a.accountId || a.accountName || '') + '\u0000' + a.campaignName + '\u0000' + (a.realCampaignName || ''))] = true; });
+        rows = rows.filter(function (r) { return validAdSets[r._groupKey]; });
       }
     }
     var summary = buildSummary_(rows, adsets);
@@ -1720,21 +1764,20 @@ function getAdSetBreakdownData(campaignName, breakdownType, filters, sessionToke
   var hIdx = resolveHeaders(data[0] || []);
   var campMapState = { source: 'adset', fallbackSource: 'campaign', map: null, fallbackMap: null };
 
-  var from = filters.dateFrom ? new Date(filters.dateFrom) : null;
-  var to = filters.dateTo ? new Date(filters.dateTo) : null;
-  if (to) to.setHours(23, 59, 59, 999);
+  var dateBounds = buildDateRangeBounds_(filters);
   var targetCampaigns = (Array.isArray(filters.campaignNames) && filters.campaignNames.length)
     ? filters.campaignNames.filter(Boolean)
     : (campaignName ? [campaignName] : []);
+  var targetAdSets = Array.isArray(filters.adSetNames) ? filters.adSetNames.filter(Boolean) : [];
 
   var agg = {};
   data.slice(1).forEach(function (r) {
     if (!r[0]) return;
-    var d = new Date(r[0]);
-    if (from && d < from) return;
-    if (to && d > to) return;
+    if (!isDateInBounds_(r[0], dateBounds)) return;
     var cname = hIdx.campaignName !== -1 ? String(r[hIdx.campaignName] || '').trim() : String(r[1] || '').trim();
     if (targetCampaigns.length && targetCampaigns.indexOf(cname) === -1) return;
+    var adsetName = hIdx.adSetName !== -1 ? String(r[hIdx.adSetName] || '').trim() : String(r[2] || '').trim();
+    if (targetAdSets.length && targetAdSets.indexOf(adsetName) === -1) return;
 
     var rowAccId = hIdx.accountId !== -1 ? String(r[hIdx.accountId] || '').trim() : '';
     var rowAccName = hIdx.accountName !== -1 ? String(r[hIdx.accountName] || '').trim() : '';

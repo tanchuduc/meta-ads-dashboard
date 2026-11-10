@@ -5766,6 +5766,7 @@ var DEMO_ALPHA_IDS_ = [
 ];
 var DASHBOARD_ACCOUNTS = [];
 var selectedAccountIds = [];
+var lastLoadedFilterKey_ = { campaign: '', adset: '', ads: '', breakdown: '' };
 
 // Auth & Admin State
 var AUTH_SESSION_KEY_ = 'meta_ads_session_token_v1';
@@ -6219,10 +6220,11 @@ function renderNarrativeSummary() {
 
   var accMap = {};
   STATE.rows.forEach(function(r) {
-    var id = r.accountId || 'act_unknown';
+    var info = findDashboardAccount_(r);
+    var id = (info && info.id) || r.accountId || 'act_unknown';
     if (!accMap[id]) {
-      var info = DASHBOARD_ACCOUNTS.find(function(a){ return a.id === id; }) || { name: r.accountName || id, shortName: r.accountName || id };
-      accMap[id] = { id: id, name: info.name, shortName: info.shortName, spent: 0, results: 0, purchases: 0, purchaseValue: 0 };
+      var fallbackInfo = info || { name: r.accountName || id, shortName: r.accountName || id };
+      accMap[id] = { id: id, name: fallbackInfo.name, shortName: fallbackInfo.shortName, spent: 0, results: 0, purchases: 0, purchaseValue: 0 };
     }
     accMap[id].spent += (r.spent || 0);
     accMap[id].results += (r.results || 0);
@@ -6311,9 +6313,9 @@ function renderAccountAllocation() {
   var totalSpend = 0;
 
   STATE.rows.forEach(function(r) {
-    var id = r.accountId || (r.accountName && DASHBOARD_ACCOUNTS.find(function(a){ return a.name === r.accountName; }) ? DASHBOARD_ACCOUNTS.find(function(a){ return a.name === r.accountName; }).id : null) || 'act_other';
+    var found = findDashboardAccount_(r);
+    var id = (found && found.id) || r.accountId || 'act_other';
     if (!accMap[id]) {
-      var found = DASHBOARD_ACCOUNTS.find(function(a){ return a.id === id; });
       accMap[id] = {
         id: id,
         name: found ? found.name : (r.accountName || id),
@@ -6934,7 +6936,7 @@ function renderDistribution() {
 
   var map = {};
   STATE.rows.forEach(function(r) {
-    var acc = DASHBOARD_ACCOUNTS.find(function(a){ return a.id === r.accountId; });
+    var acc = findDashboardAccount_(r);
     var key = acc ? acc.shortName : (r.accountName || r.accountId || 'Tài khoản khác');
     map[key] = (map[key] || 0) + (r.spent || 0);
   });
@@ -7162,7 +7164,7 @@ function renderCampaignsMiniKpi(list){
     ctr: ctr.toFixed(2) + '%',
     cpc: clicks > 0 ? formatVND(cpc, true) : '—',
     cpm: impr > 0 ? formatVND(cpm, true) : '—',
-    results: compact(conv),
+    results: compact(results),
     cpa: conv > 0 ? formatVND(cpa, true) : '—',
     value: formatVND(val, true),
     roas: roasStr(roas)
@@ -7853,28 +7855,93 @@ function updateAccountSelectorUI(){
   }
 }
 
+function findDashboardAccount_(r) {
+  if (!r) return null;
+  var rawId = String(r.accountId || '').trim();
+  var normId = /^\d+$/.test(rawId) ? ('act_' + rawId) : rawId;
+  if (rawId) {
+    var byId = DASHBOARD_ACCOUNTS.find(function(a){ return a.id === rawId || a.id === normId; });
+    if (byId) return byId;
+  }
+  var rawName = String(r.accountName || '').trim().toLowerCase();
+  if (rawName) {
+    var byName = DASHBOARD_ACCOUNTS.find(function(a){
+      return String(a.name || '').trim().toLowerCase() === rawName ||
+             String(a.shortName || '').trim().toLowerCase() === rawName;
+    });
+    if (byName) return byName;
+  }
+  return null;
+}
+
+function getGlobalFilterKey_() {
+  var accs = getSelectedAccountIds().slice().sort();
+  return JSON.stringify({
+    accs: accs,
+    from: currentRange.from || '',
+    to: currentRange.to || ''
+  });
+}
+
+function clearDependentPickersOnAccountChange_() {
+  ['campPicker', 'adsetCampPicker', 'adsetNamePicker', 'reportCampPicker', 'adsCampPicker', 'adsAdSetPicker', 'adsNamePicker'].forEach(function(id){
+    if (typeof MULTI_PICKERS !== 'undefined' && MULTI_PICKERS[id]) {
+      setMultiPickerValues(id, []);
+    }
+  });
+  adsetCampaign = '';
+  if (typeof updateCampaignDrilldownUI_ === 'function') {
+    updateCampaignDrilldownUI_();
+  }
+}
+
+function syncAllDateInputsFromRange_() {
+  ['headerDateFrom', 'filterDateFrom', 'adsetDateFrom', 'adsDateFrom', 'reportDateFrom'].forEach(function(id){
+    var el = document.getElementById(id); if (el) el.value = currentRange.from || '';
+  });
+  ['headerDateTo', 'filterDateTo', 'adsetDateTo', 'adsDateTo', 'reportDateTo'].forEach(function(id){
+    var el = document.getElementById(id); if (el) el.value = currentRange.to || '';
+  });
+}
+
+function reloadActiveViewAfterGlobalFilterChange_() {
+  if (activeTab === 'ads') {
+    loadAdsData();
+  } else if (activeTab === 'campaigns' && campaignsSubLevel === 'adset') {
+    populateAdSetCampaigns();
+    loadAdSetData();
+  } else if (activeTab === 'breakdown') {
+    if (activeBreakdownDim === 'account') {
+      loadData(readFilters());
+    } else if (activeBreakdownDim === 'custom') {
+      loadData(readFilters());
+      runCustomReport();
+    } else {
+      loadData(readFilters());
+      runPresetBreakdown_(activeBreakdownDim);
+    }
+  } else {
+    applyFilters();
+  }
+}
+
 function applyAccountSelection(){
   var ids = getCheckedAccountIds_();
   if(ids.length === 0){
     showToast('Vui lòng chọn ít nhất 1 tài khoản quảng cáo.');
     return;
   }
+  var prevAccKey = JSON.stringify(selectedAccountIds.slice().sort());
+  var nextAccKey = JSON.stringify(ids.slice().sort());
   selectedAccountIds = ids.slice();
   updateAccountSelectorUI();
   var accWrap = document.getElementById('accountMultiSelectWrap');
   if(accWrap) accWrap.classList.remove('open');
 
-  if(activeTab === 'ads'){
-    loadAdsData();
-  } else if(activeTab === 'campaigns' && campaignsSubLevel === 'adset'){
-    populateAdSetCampaigns();
-    loadAdSetData();
-  } else {
-    applyFilters();
-    if(activeTab === 'breakdown' && activeBreakdownDim === 'account'){
-      setTimeout(function(){ renderBreakdownAccount(); }, 250);
-    }
+  if(prevAccKey !== nextAccKey){
+    clearDependentPickersOnAccountChange_();
   }
+  reloadActiveViewAfterGlobalFilterChange_();
 }
 
 function computePresetDates(preset){
@@ -7892,16 +7959,17 @@ function computePresetDates(preset){
       toDate = new Date(y, m, d - 1);
       break;
     case 'last7d':
-      fromDate = new Date(y, m, d - 6);
-      toDate = new Date(y, m, d);
+      // Khớp Meta Ads Manager & pipeline (đồng bộ đến hôm qua): 7 ngày hoàn chỉnh gần nhất
+      fromDate = new Date(y, m, d - 7);
+      toDate = new Date(y, m, d - 1);
       break;
     case 'last14d':
-      fromDate = new Date(y, m, d - 13);
-      toDate = new Date(y, m, d);
+      fromDate = new Date(y, m, d - 14);
+      toDate = new Date(y, m, d - 1);
       break;
     case 'last30d':
-      fromDate = new Date(y, m, d - 29);
-      toDate = new Date(y, m, d);
+      fromDate = new Date(y, m, d - 30);
+      toDate = new Date(y, m, d - 1);
       break;
     case 'this_month':
       fromDate = new Date(y, m, 1);
@@ -7960,12 +8028,7 @@ function initHeaderDatePicker(){
     startViewDate = parseYmdLocal_(tempRange.from);
     endViewDate = parseYmdLocal_(tempRange.to);
 
-    ['filterDateFrom', 'adsetDateFrom', 'adsDateFrom'].forEach(function(id){
-      var el = document.getElementById(id); if(el) el.value = currentRange.from;
-    });
-    ['filterDateTo', 'adsetDateTo', 'adsDateTo'].forEach(function(id){
-      var el = document.getElementById(id); if(el) el.value = currentRange.to;
-    });
+    syncAllDateInputsFromRange_();
   }
   updateHeaderDateDisplay();
 }
@@ -8166,27 +8229,12 @@ function applyHeaderDateRange(){
   currentRange.to = tempRange.to;
   currentRange.preset = tempRange.preset;
 
-  ['filterDateFrom', 'adsetDateFrom', 'adsDateFrom'].forEach(function(id){
-    var el = document.getElementById(id); if(el) el.value = currentRange.from;
-  });
-  ['filterDateTo', 'adsetDateTo', 'adsDateTo'].forEach(function(id){
-    var el = document.getElementById(id); if(el) el.value = currentRange.to;
-  });
+  syncAllDateInputsFromRange_();
 
   updateHeaderDateDisplay();
   closeAllPopovers();
 
-  if(activeTab === 'ads'){
-    loadAdsData();
-  } else if(activeTab === 'campaigns' && campaignsSubLevel === 'adset'){
-    populateAdSetCampaigns();
-    loadAdSetData();
-  } else {
-    applyFilters();
-    if(activeTab === 'breakdown' && activeBreakdownDim === 'account'){
-      setTimeout(function(){ renderBreakdownAccount(); }, 250);
-    }
-  }
+  reloadActiveViewAfterGlobalFilterChange_();
 }
 
 /* ==========================================================================
@@ -8691,8 +8739,10 @@ function setPill(kind){
   else { start=new Date(end.getFullYear(), end.getMonth(), 1); }
   var fromStr = ymd(start), toStr = ymd(end);
   currentRange.from = fromStr; currentRange.to = toStr; currentRange.preset = 'custom';
+  tempRange.from = fromStr; tempRange.to = toStr; tempRange.preset = 'custom';
+  syncAllDateInputsFromRange_();
   updateHeaderDateDisplay();
-  activePill = kind; updatePillUI(); applyFilters();
+  activePill = kind; updatePillUI(); reloadActiveViewAfterGlobalFilterChange_();
 }
 
 function updatePillUI(){
@@ -8784,17 +8834,38 @@ function switchTab(tab){
     populateAdSetCampaigns();
     loadAdSetData();
   } else if (tab === 'breakdown') {
-    STATE = CAMP || { rows:[], campaigns:[], summary:emptySummaryClient() };
-    populateReportCampaigns_();
-    selectBreakdownDim(activeBreakdownDim);
+    var curKey = getGlobalFilterKey_();
+    var campStale = !CAMP || lastLoadedFilterKey_.campaign !== curKey;
+    if (activeBreakdownDim === 'account') {
+      if (campStale) {
+        loadData(readFilters());
+      } else {
+        STATE = CAMP || { rows:[], campaigns:[], summary:emptySummaryClient() };
+        populateReportCampaigns_();
+        selectBreakdownDim('account');
+      }
+    } else {
+      if (campStale) {
+        loadData(readFilters());
+      } else {
+        STATE = CAMP || { rows:[], campaigns:[], summary:emptySummaryClient() };
+        populateReportCampaigns_();
+      }
+      selectBreakdownDim(activeBreakdownDim);
+    }
   } else {
-    STATE = CAMP || { rows:[], campaigns:[], summary:emptySummaryClient() };
-    renderBanners();
-    renderNarrativeSummary();
-    renderAccountAllocation();
-    renderKPIs();
-    renderCharts();
-    renderTable();
+    var curKey2 = getGlobalFilterKey_();
+    if (!CAMP || lastLoadedFilterKey_.campaign !== curKey2) {
+      loadData(readFilters());
+    } else {
+      STATE = CAMP || { rows:[], campaigns:[], summary:emptySummaryClient() };
+      renderBanners();
+      renderNarrativeSummary();
+      renderAccountAllocation();
+      renderKPIs();
+      renderCharts();
+      renderTable();
+    }
   }
 }
 
@@ -8858,9 +8929,13 @@ function setCampaignsSubLevel(sub){
     populateAdSetCampaigns();
     loadAdSetData();
   } else {
-    STATE = CAMP || { rows:[], campaigns:[], summary:emptySummaryClient() };
-    renderBanners();
-    renderTable();
+    if (!CAMP || lastLoadedFilterKey_.campaign !== getGlobalFilterKey_()) {
+      loadData(readFilters());
+    } else {
+      STATE = CAMP || { rows:[], campaigns:[], summary:emptySummaryClient() };
+      renderBanners();
+      renderTable();
+    }
   }
 }
 
@@ -9185,33 +9260,41 @@ function DEMO_ADSET(campaign, filters){
     return true;
   });
 
-  var camps = filtered.map(function(a){
+  var dateScale = demoDateScaleFactor_(filters);
+  var camps = (dateScale <= 0 ? [] : filtered).map(function(a){
     var ctrLink = Number((a.ctrAll - 0.4).toFixed(2));
-    var roas = a.spent > 0 ? Number((a.purchaseValue / a.spent).toFixed(2)) : 0;
-    var cpa = a.purchases > 0 ? Math.round(a.spent / a.purchases) : null;
-    var clicks = Math.round(a.impressions * (ctrLink / 100));
+    var sp = Math.round(a.spent * dateScale);
+    var resCnt = Math.round(a.results * dateScale);
+    var rch = Math.round(a.reach * dateScale);
+    var pur = Math.round(a.purchases * dateScale);
+    var pv = Math.round(a.purchaseValue * dateScale);
+    var imp = Math.round(a.impressions * dateScale);
+    var roas = sp > 0 ? Number((pv / sp).toFixed(2)) : 0;
+    var cpa = pur > 0 ? Math.round(sp / pur) : null;
+    var clicks = Math.round(imp * (ctrLink / 100));
     return {
       campaignName: a.name,
       realCampaignName: a.camp,
+      accountId: a.accId,
       accountName: a.accName,
       objective: a.obj,
       dailyBudget: 5000000,
-      spent: a.spent,
-      results: a.results,
-      reach: a.reach,
-      purchases: a.purchases,
-      purchaseValue: a.purchaseValue,
-      impressions: a.impressions,
+      spent: sp,
+      results: resCnt,
+      reach: rch,
+      purchases: pur,
+      purchaseValue: pv,
+      impressions: imp,
       clicks: clicks,
       ctrLink: ctrLink,
       ctrAll: a.ctrAll,
       cpm: a.cpm,
       cpc: a.cpc,
-      frequency: a.reach > 0 ? Number((a.impressions / a.reach).toFixed(2)) : 0,
+      frequency: rch > 0 ? Number((imp / rch).toFixed(2)) : 0,
       roas: roas,
       cpa: cpa,
       cpr: cpa,
-      aov: a.purchases > 0 ? Math.round(a.purchaseValue / a.purchases) : null,
+      aov: pur > 0 ? Math.round(pv / pur) : null,
       quality: a.quality,
       learningPhaseStatus: a.learningPhaseStatus,
       audienceType: a.audienceType
@@ -9388,6 +9471,7 @@ function setDashboardFilteringState_(isLoading) {
 
 function loadData(filters){
   if(!isAuthenticated_()) return;
+  lastLoadedFilterKey_.campaign = getGlobalFilterKey_();
   var reqId = ++campReqSeq_;
   showLoading();
   setDashboardFilteringState_(true);
@@ -9396,7 +9480,10 @@ function loadData(filters){
   gasRun_('getDashboardData', [filters||{}, getSessionToken_()], function(res){
     if(reqId === campReqSeq_) onData(res);
   }, function(err){
-    if(reqId === campReqSeq_) onFail(err);
+    if(reqId === campReqSeq_) {
+      lastLoadedFilterKey_.campaign = '';
+      onFail(err);
+    }
   });
 }
 
@@ -9628,6 +9715,15 @@ function loadLiveToday(){
    15. DỮ LIỆU DEMO ĐA TÀI KHOẢN PHONG PHÚ (DEMO_DATA & DEMO_ADS)
    ========================================================================== */
 
+function demoSeed_(str) {
+  var h = 2166136261;
+  for (var i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return ((h >>> 0) % 10000) / 10000;
+}
+
 function DEMO_DATA(filters){
   filters = filters || {};
   var rawCampaignTemplates = [
@@ -9679,58 +9775,64 @@ function DEMO_DATA(filters){
 
   var rows = [];
   var today = new Date();
-  var daysCount = 14;
+  var yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+  var yesterdayTs = tsOf(ymd(yesterday));
 
-  var minTs = filters.dateFrom ? new Date(filters.dateFrom).getTime() : -Infinity;
-  var maxTs = filters.dateTo ? new Date(filters.dateTo).getTime() + 86399999 : Infinity;
+  var minTs = filters.dateFrom ? tsOf(filters.dateFrom) : (yesterdayTs - 29 * 86400000);
+  var maxTs = filters.dateTo ? Math.min(tsOf(filters.dateTo), yesterdayTs) : yesterdayTs;
+  if (!isNaN(minTs) && !isNaN(maxTs) && minTs <= maxTs) {
+    var spanDays = Math.min(180, Math.round((maxTs - minTs) / 86400000) + 1);
+    var startTs = maxTs - (spanDays - 1) * 86400000;
+    for (var dayIdx = 0; dayIdx < spanDays; dayIdx++) {
+      var curTs = startTs + dayIdx * 86400000;
+      var dObj = new Date(curTs);
+      var dateStr = dObj.getUTCFullYear() + '-' + ('0' + (dObj.getUTCMonth() + 1)).slice(-2) + '-' + ('0' + dObj.getUTCDate()).slice(-2);
+      var dayFactor = 0.85 + Math.sin(dayIdx * 0.7) * 0.25;
 
-  for (var dayIdx = daysCount - 1; dayIdx >= 0; dayIdx--) {
-    var d = new Date(today);
-    d.setDate(d.getDate() - dayIdx);
-    var dateStr = ymd(d);
-    var curTs = tsOf(dateStr);
-    if(curTs < minTs || curTs > maxTs) continue;
-    var dayFactor = 0.85 + Math.sin(dayIdx * 0.7) * 0.25;
+      activeTemplates.forEach(function(tpl) {
+        var r1 = demoSeed_(dateStr + '|' + tpl.accId + '|' + tpl.camp + '|1');
+        var r2 = demoSeed_(dateStr + '|' + tpl.accId + '|' + tpl.camp + '|2');
+        var r3 = demoSeed_(dateStr + '|' + tpl.accId + '|' + tpl.camp + '|3');
+        var spend = Math.round(tpl.baseSpend * dayFactor * (0.9 + r1 * 0.2));
+        var cpm = Math.round(tpl.cpm * (0.95 + r2 * 0.1));
+        var impressions = cpm > 0 ? Math.round(spend / cpm * 1000) : 0;
+        var ctrLink = Number((tpl.ctr * (0.92 + r3 * 0.16)).toFixed(2));
+        var clicks = Math.round(impressions * (ctrLink / 100));
+        var reach = Math.round(impressions / tpl.freq);
+        var purchases = tpl.purchMultiplier > 0 ? Math.round((clicks * 0.035 * tpl.purchMultiplier) * (0.9 + r2 * 0.2)) : 0;
+        var purchaseValue = purchases > 0 ? Math.round(spend * tpl.roas * (0.95 + r1 * 0.1)) : 0;
 
-    activeTemplates.forEach(function(tpl) {
-      var spend = Math.round(tpl.baseSpend * dayFactor * (0.9 + Math.random() * 0.2));
-      var cpm = Math.round(tpl.cpm * (0.95 + Math.random() * 0.1));
-      var impressions = cpm > 0 ? Math.round(spend / cpm * 1000) : 0;
-      var ctrLink = Number((tpl.ctr * (0.92 + Math.random() * 0.16)).toFixed(2));
-      var clicks = Math.round(impressions * (ctrLink / 100));
-      var reach = Math.round(impressions / tpl.freq);
-      var purchases = tpl.purchMultiplier > 0 ? Math.round((clicks * 0.035 * tpl.purchMultiplier) * (0.9 + Math.random() * 0.2)) : 0;
-      var purchaseValue = purchases > 0 ? Math.round(spend * tpl.roas * (0.95 + Math.random() * 0.1)) : 0;
-
-      rows.push({
-        accountId: tpl.accId,
-        accountName: tpl.accName,
-        campaignName: tpl.camp,
-        objective: tpl.obj,
-        reportingEnds: dateStr,
-        reportingEndsTs: tsOf(dateStr),
-        spent: spend,
-        impressions: impressions,
-        reach: reach,
-        clicks: clicks,
-        ctrLink: ctrLink,
-        ctrAll: Number((ctrLink + 0.5).toFixed(2)),
-        cpm: cpm,
-        cpc: clicks > 0 ? Math.round(spend / clicks) : 0,
-        purchases: purchases,
-        results: purchases,
-        purchaseValue: purchaseValue,
-        frequency: tpl.freq
+        rows.push({
+          accountId: tpl.accId,
+          accountName: tpl.accName,
+          campaignName: tpl.camp,
+          objective: tpl.obj,
+          reportingEnds: dateStr,
+          reportingEndsTs: curTs,
+          spent: spend,
+          impressions: impressions,
+          reach: reach,
+          clicks: clicks,
+          ctrLink: ctrLink,
+          ctrAll: Number((ctrLink + 0.5).toFixed(2)),
+          cpm: cpm,
+          cpc: clicks > 0 ? Math.round(spend / clicks) : 0,
+          purchases: purchases,
+          results: purchases,
+          purchaseValue: purchaseValue,
+          frequency: tpl.freq
+        });
       });
-    });
+    }
   }
 
   var campMap = {};
   rows.forEach(function(r) {
-    var k = r.campaignName;
+    var k = (r.accountId || r.accountName || '') + '\u0000' + r.campaignName;
     if(!campMap[k]){
       campMap[k] = {
         campaignName: r.campaignName,
+        accountId: r.accountId,
         accountName: r.accountName,
         objective: r.objective,
         dailyBudget: Math.round(r.spent * 1.2),
@@ -9932,9 +10034,19 @@ function DEMO_ADS(filters){
     }
   ];
 
-  // Lọc theo phạm vi tài khoản được phép & đang chọn
+  // Lọc theo phạm vi tài khoản được phép & đang chọn + khoảng ngày
   var targetAccounts = filters.accountIds || selectedAccountIds;
-  ads = ads.filter(function(a){ return isAccountAllowedInDemo_(a.accId, targetAccounts); });
+  var adsDateScale = demoDateScaleFactor_(filters);
+  ads = (adsDateScale <= 0 ? [] : ads).filter(function(a){ return isAccountAllowedInDemo_(a.accId, targetAccounts); }).map(function(a){
+    var copy = Object.assign({}, a);
+    copy.spent = Math.round(a.spent * adsDateScale);
+    copy.impressions = Math.round(a.impressions * adsDateScale);
+    copy.purchases = Math.round(a.purchases * adsDateScale);
+    copy.purchaseValue = Math.round(a.purchaseValue * adsDateScale);
+    copy.roas = copy.spent > 0 ? Number((copy.purchaseValue / copy.spent).toFixed(2)) : 0;
+    copy.cpa = copy.purchases > 0 ? Math.round(copy.spent / copy.purchases) : null;
+    return copy;
+  });
 
   var targetCampaigns = (Array.isArray(filters.campaignNames) && filters.campaignNames.length)
     ? filters.campaignNames.filter(Boolean)
@@ -10096,8 +10208,8 @@ function readReportConfig(){
   return {
     accountIds: getSelectedAccountIds(),
     breakdowns: reportBreakdownSel.slice(),
-    dateFrom: val('reportDateFrom'),
-    dateTo: val('reportDateTo'),
+    dateFrom: val('reportDateFrom') || currentRange.from || val('headerDateFrom'),
+    dateTo: val('reportDateTo') || currentRange.to || val('headerDateTo'),
     region: val('reportRegionFilter'),
     campaignNames: campNames,
     campaignName: campNames.length === 1 ? campNames[0] : '',
@@ -10145,6 +10257,11 @@ function selectBreakdownDim(dim){
     renderBreakdownAccount();
     return;
   }
+  var df = document.getElementById('reportDateFrom');
+  var dt = document.getElementById('reportDateTo');
+  if(df && !df.value && currentRange.from) df.value = currentRange.from;
+  if(dt && !dt.value && currentRange.to) dt.value = currentRange.to;
+
   if(activeBreakdownDim === 'custom'){
     return;
   }
@@ -10153,12 +10270,30 @@ function selectBreakdownDim(dim){
   reportMetricSel = ['spend','impressions','clicks','ctr','cpm','purchases','purchaseValue','roas'];
   buildReportPickers();
 
-  var df = document.getElementById('reportDateFrom');
-  var dt = document.getElementById('reportDateTo');
-  if(df && currentRange.from) df.value = currentRange.from;
-  if(dt && currentRange.to) dt.value = currentRange.to;
-
   runPresetBreakdown_(activeBreakdownDim);
+}
+
+function demoDateScaleFactor_(filters) {
+  filters = filters || {};
+  var fromStr = filters.dateFrom || currentRange.from;
+  var toStr = filters.dateTo || currentRange.to;
+  if (!fromStr || !toStr) return 1;
+  var todayStr = ymd(new Date());
+  var todayTs = tsOf(todayStr);
+  var fTs = tsOf(fromStr);
+  var tTs = tsOf(toStr);
+  if (isNaN(fTs) || isNaN(tTs) || fTs > todayTs) return 0;
+  var clampedEnd = Math.min(tTs, todayTs);
+  if (clampedEnd < fTs) return 0;
+  var days = Math.max(1, Math.round((clampedEnd - fTs) / 86400000) + 1);
+  return days / 7;
+}
+
+function demoAccountShareFactor_(accountIds) {
+  var total = Math.max(1, DASHBOARD_ACCOUNTS.length || DEMO_ALL_ACCOUNTS_.length);
+  if (!accountIds || !accountIds.length) return 0;
+  if (accountIds.indexOf('ALL') !== -1) return 1;
+  return Math.max(0.1, Math.min(1, accountIds.length / total));
 }
 
 function runPresetBreakdown_(dim){
@@ -10166,8 +10301,8 @@ function runPresetBreakdown_(dim){
   var cfg = {
     accountIds: getSelectedAccountIds(),
     breakdowns: [dim],
-    dateFrom: currentRange.from || val('reportDateFrom'),
-    dateTo: currentRange.to || val('reportDateTo'),
+    dateFrom: val('reportDateFrom') || currentRange.from || val('headerDateFrom'),
+    dateTo: val('reportDateTo') || currentRange.to || val('headerDateTo'),
     region: '',
     campaignName: '',
     metrics: reportMetricSel.slice()
@@ -10176,6 +10311,7 @@ function runPresetBreakdown_(dim){
   if(bz) bz.innerHTML = '<div class="banner demo"><i class="fas fa-spinner fa-spin"></i><div>Đang tổng hợp dữ liệu Breakdown…</div></div>';
 
   if(isDemo()){
+    var scale = demoDateScaleFactor_(cfg) * demoAccountShareFactor_(cfg.accountIds);
     var demoMap = {
       age: [
         { label:'25-34', spend:24000000, impressions:670000, clicks:16200, ctr:2.42, cpm:35800, cpc:1481, purchases:128, purchaseValue:83100000, roas:3.46, frequency:1.8 },
@@ -10205,7 +10341,27 @@ function runPresetBreakdown_(dim){
         { label:'Các tỉnh khác',   spend:10800000, impressions:370000, clicks:6600,  ctr:1.78, cpm:29200, cpc:1636, purchases:34,  purchaseValue:22400000, roas:2.07, frequency:1.6 }
       ]
     };
-    setTimeout(function(){ onReportData({ rows: demoMap[dim] || [] }); }, 150);
+    var baseRows = scale <= 0 ? [] : (demoMap[dim] || []).map(function(row){
+      var sp = Math.round(row.spend * scale);
+      var imp = Math.round(row.impressions * scale);
+      var clk = Math.round(row.clicks * scale);
+      var pur = Math.round(row.purchases * scale);
+      var pv = Math.round(row.purchaseValue * scale);
+      return {
+        label: row.label,
+        spend: sp,
+        impressions: imp,
+        clicks: clk,
+        ctr: imp > 0 ? (clk / imp * 100) : 0,
+        cpm: imp > 0 ? (sp / imp * 1000) : 0,
+        cpc: clk > 0 ? (sp / clk) : 0,
+        purchases: pur,
+        purchaseValue: pv,
+        roas: sp > 0 ? (pv / sp) : 0,
+        frequency: row.frequency
+      };
+    });
+    setTimeout(function(){ onReportData({ rows: baseRows }); }, 150);
     return;
   }
 
@@ -10218,14 +10374,14 @@ function renderBreakdownAccount(){
   var rowsSource = (CAMP && CAMP.rows) ? CAMP.rows : [];
   var accMap = {};
   rowsSource.forEach(function(r){
-    var acc = DASHBOARD_ACCOUNTS.find(function(a){ return a.id === r.accountId; });
+    var acc = findDashboardAccount_(r);
     var key = acc ? acc.shortName : (r.accountName || r.accountId || 'Khác');
     if(!accMap[key]) accMap[key] = { label:key, spend:0, impressions:0, clicks:0, reach:0, purchases:0, purchaseValue:0 };
     accMap[key].spend += num(r.spent);
     accMap[key].impressions += num(r.impressions);
     accMap[key].clicks += num(r.clicks);
     accMap[key].reach += num(r.reach);
-    accMap[key].purchases += num(r.purchases || r.results);
+    accMap[key].purchases += num(r.purchases);
     accMap[key].purchaseValue += num(r.purchaseValue);
   });
 
@@ -10892,6 +11048,7 @@ function enterDashboardAfterLogin_(user, token) {
   }
 
   CAMP = null; ADSET = null; ADS = null; DATA_MAX_TS = NaN;
+  lastLoadedFilterKey_ = { campaign: '', adset: '', ads: '', breakdown: '' };
   ADMIN_STATE = { users: [], allAccounts: [], loading: false, error: '' };
 
   var overlay = document.getElementById('authOverlay');
@@ -10915,7 +11072,9 @@ function enterDashboardAfterLogin_(user, token) {
   } catch (e) {}
 
   switchTab(initialTab);
-  loadData(readFilters());
+  if (initialTab !== 'overview' && initialTab !== 'campaigns' && initialTab !== 'breakdown') {
+    loadData(readFilters());
+  }
   loadFreshness();
 
   if (!freshnessIntervalId_) {
@@ -10946,6 +11105,7 @@ function resetToLoginScreen_(errorMsg) {
   DASHBOARD_ACCOUNTS = [];
   selectedAccountIds = [];
   CAMP = null; ADSET = null; ADS = null; DATA_MAX_TS = NaN;
+  lastLoadedFilterKey_ = { campaign: '', adset: '', ads: '', breakdown: '' };
   ADMIN_STATE = { users: [], allAccounts: [], loading: false, error: '' };
   STATE = { rows:[], campaigns:[], summary:null, missing:[], error:null, demo:false };
 
@@ -11733,8 +11893,31 @@ document.addEventListener('DOMContentLoaded', function(){
   ['reportDateFrom','reportDateTo'].forEach(function(id){
     var el = document.getElementById(id);
     if(el) el.addEventListener('change', function(){
-      if(activeTab === 'breakdown' && activeBreakdownDim !== 'account' && activeBreakdownDim !== 'custom'){
-        selectBreakdownDim(activeBreakdownDim);
+      var fVal = val('reportDateFrom');
+      var tVal = val('reportDateTo');
+      if (fVal && tVal && tsOf(fVal) > tsOf(tVal)) {
+        tVal = fVal;
+        var dtEl = document.getElementById('reportDateTo');
+        if (dtEl) dtEl.value = tVal;
+      }
+      if (fVal) currentRange.from = fVal;
+      if (tVal) currentRange.to = tVal;
+      currentRange.preset = 'custom';
+      tempRange.from = currentRange.from;
+      tempRange.to = currentRange.to;
+      tempRange.preset = 'custom';
+      syncAllDateInputsFromRange_();
+      updateHeaderDateDisplay();
+      if(activeTab === 'breakdown'){
+        if (activeBreakdownDim === 'account') {
+          loadData(readFilters());
+        } else if (activeBreakdownDim === 'custom') {
+          loadData(readFilters());
+          runCustomReport();
+        } else {
+          loadData(readFilters());
+          runPresetBreakdown_(activeBreakdownDim);
+        }
       }
     });
   });
