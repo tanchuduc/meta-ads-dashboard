@@ -4,7 +4,7 @@
 
 var ACCESS_TOKEN = 'EAAOhgsUSolIBS6ke3vNsxPjH2K4peyf4Mm2THErTUcRQxCw6pJhQl5mGQy3Vy8oQjQvohIXLrb5FRHesEfZAoLUDWiZCIzX5VsvVOWCAPks2RjLraLbr3szthrMHCJVoMwoe1erU3ZAG6SZBxLYXXyPcYKamZAW4JpvOVBzTZAZBaeIpqTfTqzrxiQ1ClAJLZB0CxwZDZD';
 
-// Danh sách 8 tài khoản quảng cáo được phân quyền từ System User
+// Danh sách 9 tài khoản quảng cáo được phân quyền từ System User
 var AD_ACCOUNTS = [
   { id: 'act_988452388193871',  name: 'Alpha 1 GMT +7 20tr - Hoa' },
   { id: 'act_3863604326993604', name: 'TKQC Alpha 2 GMT-7- Hoa' },
@@ -13,7 +13,8 @@ var AD_ACCOUNTS = [
   { id: 'act_1855997818105694', name: 'Alpha 6 - GMT -3 - Tấn' },
   { id: 'act_542081774682636',  name: 'Alpha 7 - GMT-3 - HTXB - Phương' },
   { id: 'act_848982799482573',  name: 'Alpha 8 - GMT-4 (11h) - MKT Sống' },
-  { id: 'act_2929843193813956', name: 'TKQC MED - Alpha 10 GMT +7 (0h)' }
+  { id: 'act_2929843193813956', name: 'TKQC MED - Alpha 10 GMT +7 (0h)' },
+  { id: 'act_1845118092714419', name: 'TK 1 - MKT Alpha - Thảo' }
 ];
 
 // ID thư mục Google Drive của bạn

@@ -261,7 +261,12 @@ function getDashboardData(filters) {
         if (row.accountId && selectedAccounts.indexOf(row.accountId) === -1) return false;
       }
       if (filters.search) {
-        if (row.campaignName.toLowerCase().indexOf(String(filters.search).toLowerCase()) === -1) return false;
+        var needle = String(filters.search).toLowerCase().trim();
+        var matchCamp = row.campaignName && row.campaignName.toLowerCase().indexOf(needle) !== -1;
+        var matchAccName = row.accountName && row.accountName.toLowerCase().indexOf(needle) !== -1;
+        var matchAccId = row.accountId && row.accountId.toLowerCase().indexOf(needle) !== -1;
+        var matchObj = row.objective && row.objective.toLowerCase().indexOf(needle) !== -1;
+        if (!matchCamp && !matchAccName && !matchAccId && !matchObj) return false;
       }
       if (filters.objective) {
         if (row.objective !== filters.objective) return false;
@@ -1314,6 +1319,17 @@ function getAdSetData(campaignName, filters) {
     if (campaignName) rows = rows.filter(function (r) { return r._realCampaign === campaignName; });
     else return { rows: [], campaigns: [], campaignList: campaignList, summary: emptySummary_(), error: null };
 
+    if (filters.search) {
+      var needle = String(filters.search).toLowerCase().trim();
+      rows = rows.filter(function (r) {
+        var matchAdSet = r.campaignName && r.campaignName.toLowerCase().indexOf(needle) !== -1;
+        var matchCamp = r._realCampaign && r._realCampaign.toLowerCase().indexOf(needle) !== -1;
+        var matchAcc = r.accountName && r.accountName.toLowerCase().indexOf(needle) !== -1;
+        var matchAccId = r.accountId && r.accountId.toLowerCase().indexOf(needle) !== -1;
+        return matchAdSet || matchCamp || matchAcc || matchAccId;
+      });
+    }
+
     var statusMap = getAdSetStatusMap_();
     var adsets = aggregateByCampaign_(rows, statusMap);
     var summary = buildSummary_(rows, adsets);
@@ -1566,8 +1582,15 @@ function getAdData(filters) {
 
     if (filters.adSetName) rows = rows.filter(function (r) { return r._realAdSet === filters.adSetName; });
     if (filters.search) {
-      var needle = String(filters.search).toLowerCase();
-      rows = rows.filter(function (r) { return r._adName.toLowerCase().indexOf(needle) !== -1; });
+      var needle = String(filters.search).toLowerCase().trim();
+      rows = rows.filter(function (r) {
+        var matchAd = r._adName && r._adName.toLowerCase().indexOf(needle) !== -1;
+        var matchCamp = r._realCampaign && r._realCampaign.toLowerCase().indexOf(needle) !== -1;
+        var matchAdSet = r._realAdSet && r._realAdSet.toLowerCase().indexOf(needle) !== -1;
+        var matchAcc = r.accountName && r.accountName.toLowerCase().indexOf(needle) !== -1;
+        var matchAccId = r.accountId && r.accountId.toLowerCase().indexOf(needle) !== -1;
+        return matchAd || matchCamp || matchAdSet || matchAcc || matchAccId;
+      });
     }
 
     var ads = aggregateByCampaign_(rows, null); // no learning-phase/audience-type join at ad level

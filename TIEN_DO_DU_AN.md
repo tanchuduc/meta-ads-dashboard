@@ -60,7 +60,7 @@ Tất cả đã được cấu hình sẵn trong file [`apps-script/Config.gs`](
 
 1. **Meta Marketing API Token**:
    - Access Token của System User đã được điền sẵn trong `ACCESS_TOKEN` (Meta Graph API v18.0).
-2. **Danh sách 8 Tài khoản quảng cáo được phân quyền (`AD_ACCOUNTS`)**:
+2. **Danh sách 9 Tài khoản quảng cáo được phân quyền (`AD_ACCOUNTS`)**:
    - `act_988452388193871`: Alpha 1 GMT +7 20tr - Hoa
    - `act_3863604326993604`: TKQC Alpha 2 GMT-7- Hoa
    - `act_140020454941995`: Alpha 5 GMT -7 - Tấn
@@ -69,6 +69,7 @@ Tất cả đã được cấu hình sẵn trong file [`apps-script/Config.gs`](
    - `act_542081774682636`: Alpha 7 - GMT-3 - HTXB - Phương
    - `act_848982799482573`: Alpha 8 - GMT-4 (11h) - MKT Sống
    - `act_2929843193813956`: TKQC MED - Alpha 10 GMT +7 (0h)
+   - `act_1845118092714419`: TK 1 - MKT Alpha - Thảo
 3. **Thư mục Google Drive lưu trữ 3 Sheet**:
    - `DRIVE_FOLDER_ID`: `1WjwUW-4iyNrLLZHfDF9fpooqHrZkSCJg`
 4. **Cơ chế lưu trữ ID Sheet**:
@@ -102,6 +103,35 @@ Tất cả đã được cấu hình sẵn trong file [`apps-script/Config.gs`](
 - [x] **Kiểm thử cú pháp code (Syntax Validation)**:
   - Viết script kiểm tra JS (`verify_adpipeline.js`, `verify_adsetpipeline.js`, `check_missing.js`).
   - Toàn bộ các file `.gs` đều compile sạch không lỗi cú pháp.
+
+### B. Nâng Cấp Toàn Diện Giao Diện UI/UX 2.0 (Executive Performance Dashboard) - 10/11/2026
+- [x] **Hệ thống Thiết kế & CSS Design System (`index.html` & `Dashboard.html`)**:
+  - Tích hợp font Inter với cấu hình bắt buộc `font-feature-settings: "tnum"` cho toàn bộ số liệu tài chính.
+  - Bảng màu Slate hiện đại (--slate-50 đến --slate-900), Meta Blue (#0064E0), Emerald (#10B981 cho ROAS tốt), Amber (#F59E0B cho cảnh báo), Crimson (#EF4444 cho đốt tiền).
+  - Viền thẻ 1px siêu mảnh, bóng đổ mềm, lột xác hoàn toàn khỏi phong cách Facebook 2018 cũ.
+- [x] **Tầng 1 - Executive Narrative Storyline & Account Allocation Bar**:
+  - Banner điều hành tự động phân tích và sinh câu kết luận tình hình kinh doanh cho ban giám đốc chỉ trong 3 giây.
+  - Thanh phân bổ ngân sách 8 tài khoản quảng cáo đa sắc với tooltip hover trực quan.
+- [x] **Tầng 2 - Thẻ KPI Phễu Toàn Diện (Full-Funnel) & Canvas Sparklines**:
+  - 3 tầng phễu: Top Funnel (Spend, Impr, Reach, Frequency) -> Mid Funnel (Clicks, CTR, CPC, CPM) -> Bottom Funnel (Purchases, CPA, Value, ROAS).
+  - Đồ họa mini Sparklines 14-30 ngày vẽ bằng Canvas 2D siêu nhẹ.
+  - So sánh kép (Dual Delta): Hiển thị đồng thời % thay đổi và số tiền/số lượng tuyệt đối so với kỳ trước.
+  - Huy hiệu cảnh báo bão hòa tệp (Fatigue Badge) trên Frequency và áp lực đấu giá trên CPM.
+- [x] **Tầng 3 - Bộ 4 Biểu Đồ Media Buying Suite (Chart.js)**:
+  - Chart 1: Trend Combo (Chi tiêu vs ROAS & Doanh thu).
+  - Chart 2: Auction Pressure (Lượt hiển thị Impressions vs Giá thầu CPM).
+  - Chart 3: Traffic Efficiency (Lượt nhấp Clicks vs Giá nhấp CPC).
+  - Chart 4: Phân bổ Ngân sách Đa Tài Khoản & Mục tiêu (Donut).
+- [x] **Tầng 4 & 5 - In-Cell Micro Data Bars, Heatmap Shading & Creative Matrix**:
+  - Cột Chi tiêu và Doanh số tích hợp thanh đo tỷ lệ phần trăm (Micro Data Bars).
+  - Cột ROAS, CPA, CTR được tô màu nhiệt (Heatmap Shading) nhận diện nhanh Hero Ads vs Wasted Ads.
+  - Bộ nút lọc nhanh 1-click (Top Chi Tiêu, Top ROAS, Cảnh Báo Bão Hòa).
+  - Tab Ads tích hợp bộ chuyển đổi (View Switcher): Ma trận bảng (Heatmap Matrix Table) kèm thumbnail 45px (zoom preview 200px khi hover) và Lưới thẻ trực quan (Visual Cards).
+- [x] **Bản địa hóa & Format Chuẩn VNĐ**:
+  - Thay thế triệt để hàm `peso()`, sửa dứt điểm lỗi UTF-8 `â‚«` thành `₫`.
+  - Hỗ trợ format tài chính thông minh: `Tr ₫`, `Tỷ ₫`, `K ₫`.
+  - Dữ liệu demo offline đa tài khoản phong phú, chân thực cho cả 8 tài khoản.
+  - Đồng bộ 100% giữa `index.html` và `apps-script/Dashboard.html`.
 
 ---
 
