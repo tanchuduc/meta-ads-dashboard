@@ -90,6 +90,7 @@ function diagnoseAdSet() {
 }
 
 var ADSET_HEADERS_ = [
+  'Account ID', 'Account Name',
   'Ad set name', 'Campaign name', 'Objective', 'Attribution setting', 'Campaign bid strategy',
   'Reporting ends', 'Daily budget', 'Engagement rate ranking', 'Quality ranking', 'Frequency',
   'CPM (cost per 1,000 impressions)', 'Reach', 'Results', 'Blocked messaging contacts', 'Amount spent',
@@ -130,6 +131,10 @@ var ADSET_MAIN_FAIL_STREAK_PROP_ = 'ADSET_MAIN_IMPORT_FAIL_STREAK';
 // cause (we don't know what it is yet), but it makes the NEXT occurrence visible — same
 // email-alert treatment as a graceful fetch failure gets — so it can actually be diagnosed
 // instead of guessed at.
+function checkYearRolloverWarning_(type) {
+  // Stub helper for standalone setup
+}
+
 function importAdSetData() {
   try {
     checkYearRolloverWarning_('adset'); // see WorkbookRollover.gs — logs/emails a heads-up ~14 days before Jan 1
@@ -256,32 +261,39 @@ function fixAdSetMainTableGapNow() {
 // to know whether an empty/partial result means "genuinely no data" or "the fetch broke
 // partway," so they can avoid destructively overwriting good existing rows with nothing.
 function fetchAdSetRows_(sinceStr, untilStr) {
-  var settings = fetchAdSetSettings_();   // also uses retry internally
-  var params = {
-    level: 'adset',
-    time_increment: 1,
-    include_archived: true,
-    fields: 'adset_name,' + INSIGHT_FIELDS_,
-    time_range: JSON.stringify({ since: sinceStr, until: untilStr }),
-    limit: 500
-  };
-  var qs = Object.keys(params).map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(String(params[k])); }).join('&');
-  var base = 'https://graph.facebook.com/v18.0/' + ACCOUNT_ID + '/insights';
+  var accounts = (typeof AD_ACCOUNTS !== 'undefined' && AD_ACCOUNTS.length) ? AD_ACCOUNTS : [{ id: (typeof ACCOUNT_ID !== 'undefined' ? ACCOUNT_ID : ''), name: 'Default' }];
+  var out = [], anySuccess = false, lastError = '';
 
-  var next = null, out = [], errorMessage = '';
-  do {
-    var url = next ? next : base + '?' + qs;
-    var data = fetchWithRetry_(url);
-    if (!data || data.error) {
-      errorMessage = (data && data.error) ? JSON.stringify(data.error) : 'no response from fetchWithRetry_';
-      Logger.log('adset insights error: ' + errorMessage);
-      return { rows: out, ok: false, errorMessage: errorMessage };   // stop pagination, flag the whole fetch as failed
-    }
-    (data.data || []).forEach(function (item) { out.push(buildAdSetRow_(item, settings)); });
-    next = (data.paging && data.paging.next) ? data.paging.next : null;
-    if (next) Utilities.sleep(500);
-  } while (next);
-  return { rows: out, ok: true, errorMessage: '' };
+  for (var i = 0; i < accounts.length; i++) {
+    var acc = accounts[i];
+    var settings = fetchAdSetSettings_(acc.id);
+    var params = {
+      level: 'adset',
+      time_increment: 1,
+      include_archived: true,
+      fields: 'adset_name,' + INSIGHT_FIELDS_,
+      time_range: JSON.stringify({ since: sinceStr, until: untilStr }),
+      limit: 500
+    };
+    var qs = Object.keys(params).map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(String(params[k])); }).join('&');
+    var base = 'https://graph.facebook.com/v18.0/' + acc.id + '/insights';
+
+    var next = null;
+    do {
+      var url = next ? next : base + '?' + qs;
+      var data = fetchWithRetry_(url);
+      if (!data || data.error) {
+        lastError = (data && data.error) ? JSON.stringify(data.error) : 'no response from fetchWithRetry_';
+        Logger.log('adset insights error for ' + acc.name + ': ' + lastError);
+        break;
+      }
+      anySuccess = true;
+      (data.data || []).forEach(function (item) { out.push(buildAdSetRow_(item, settings, acc)); });
+      next = (data.paging && data.paging.next) ? data.paging.next : null;
+      if (next) Utilities.sleep(200);
+    } while (next);
+  }
+  return { rows: out, ok: anySuccess || out.length > 0 || !lastError, errorMessage: lastError };
 }
 
 // ── GENERIC RETRY WRAPPER for any Meta API call ──
@@ -369,20 +381,21 @@ function fetchWithRetry_(url, maxRetries) {
   return { error: { message: 'Max retries exceeded' } };
 }
 
-// One 36-col row: [Ad set name] + the same 35 columns your campaign builder produces.
-function buildAdSetRow_(item, adsetSettings) {
-  var base = buildRowFromInsight_(item, {});     // 35 cols (bid/budget blank because we pass {})
+// One row: [Account ID, Account Name, Ad set name] + the campaign fields.
+function buildAdSetRow_(item, adsetSettings, acc) {
+  var base = buildRowFromInsight_(item, {}, acc);
   var adset = item.adset_name || '';
-  var st = adsetSettings[adset] || {};
-  base[3] = st.bid_strategy || '';               // col 5 in the sheet = ad-set bid strategy
-  base[5] = st.daily_budget || 0;                // col 7 in the sheet = ad-set daily budget
-  return [adset].concat(base);
+  var st = (adsetSettings && adsetSettings[adset]) ? adsetSettings[adset] : {};
+  base[5] = st.bid_strategy || '';               // bid strategy
+  base[7] = st.daily_budget || 0;                // daily budget
+  return [base[0], base[1], adset].concat(base.slice(2));
 }
 
 // Ad-set names → {bid_strategy, daily_budget}. Retry‑aware.
-function fetchAdSetSettings_() {
+function fetchAdSetSettings_(accountId) {
+  var actId = accountId || (typeof AD_ACCOUNTS !== 'undefined' && AD_ACCOUNTS.length ? AD_ACCOUNTS[0].id : ACCOUNT_ID);
   var map = {};
-  var base = 'https://graph.facebook.com/v18.0/' + ACCOUNT_ID + '/adsets';
+  var base = 'https://graph.facebook.com/v18.0/' + actId + '/adsets';
   var params = { fields: 'name,bid_strategy,daily_budget', limit: 200 };
   var qs = Object.keys(params).map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(String(params[k])); }).join('&');
   var next = base + '?' + qs, guard = 0;
@@ -592,7 +605,7 @@ function removeAdSetRowsInRange_(sheet, sinceStr, untilStr) {
   var s = new Date(sinceStr).getTime();
   var u = new Date(untilStr).getTime() + 86399999;
   var kept = vals.filter(function (r) {
-    var ts = new Date(dayKey_(r[5])).getTime();
+    var ts = new Date(dayKey_(r[7])).getTime();
     if (isNaN(ts)) return true;
     return !(ts >= s && ts <= u);
   });

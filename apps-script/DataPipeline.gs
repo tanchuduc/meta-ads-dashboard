@@ -218,9 +218,24 @@ function ensureCampaignHeaders_(sheet) {
   if (blank || !matches) sheet.getRange(1, 1, 1, CAMPAIGN_HEADERS_.length).setValues([CAMPAIGN_HEADERS_]);
 }
 
+function getCampaignSpreadsheet_() {
+  if (typeof getSheet_ === 'function') {
+    try {
+      return getSheet_().getParent();
+    } catch (e) {}
+  }
+  var id = (typeof getCampaignSheetId_ === 'function' ? getCampaignSheetId_() : null) || (typeof SHEET_ID !== 'undefined' ? SHEET_ID : null);
+  if (id && id !== 'YOUR_SPREADSHEET_ID' && id !== '[SHEET_ID]') {
+    return SpreadsheetApp.openById(id);
+  }
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) throw new Error('Chưa kết nối Campaign Sheet. Hãy chạy initSetupGoogleSheets() trước.');
+  return ss;
+}
+
 // ── DAILY IMPORT (trigger: ~midnight–1am) → writes YESTERDAY to test-fb ──
 function importDataFromJSON() {
-  var ss = (typeof getSheet_ === 'function') ? getSheet_().getParent() : SpreadsheetApp.getActiveSpreadsheet();
+  var ss = getCampaignSpreadsheet_();
   var sheet = ss.getSheetByName('test-fb');
   if (!sheet) sheet = ss.insertSheet('test-fb');
   ensureCampaignHeaders_(sheet);
@@ -304,9 +319,9 @@ function backfillAllHistory_CampaignLevel() {
 }
 
 function backfillDateRange(sinceStr, untilStr) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = getCampaignSpreadsheet_();
   var dest = ss.getSheetByName('data - by day');
-  if (!dest) { Logger.log('"data - by day" not found — run backfillAllHistory_CampaignLevel once to create it.'); return; }
+  if (!dest) dest = ss.insertSheet('data - by day');
   ensureCampaignHeaders_(dest);
 
   // 1) idempotency: remove any existing rows already in [since, until]
@@ -362,9 +377,9 @@ function backfillDateRange(sinceStr, untilStr) {
 var CTR_LINK_COL_CAMPAIGN_ = 18; // 1-based column of "CTR (link click-through rate)" in "data - by day"
 
 function recomputeCtrLinkOnly_CampaignLevel(sinceStr, untilStr) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = getCampaignSpreadsheet_();
   var dest = ss.getSheetByName('data - by day');
-  if (!dest) { Logger.log('"data - by day" not found.'); return; }
+  if (!dest) dest = ss.insertSheet('data - by day');
   var lastRow = dest.getLastRow();
   if (lastRow < 2) { Logger.log('recomputeCtrLinkOnly_CampaignLevel: no data rows.'); return; }
 
@@ -439,9 +454,9 @@ function recomputeCtrLinkOnly_CampaignLevel(sinceStr, untilStr) {
 var RESULTS_COL_CAMPAIGN_ = 12; // 1-based column of "Results" in "data - by day"
 
 function recomputeResultsOnly_CampaignLevel(sinceStr, untilStr) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = getCampaignSpreadsheet_();
   var dest = ss.getSheetByName('data - by day');
-  if (!dest) { Logger.log('"data - by day" not found.'); return; }
+  if (!dest) dest = ss.insertSheet('data - by day');
   var lastRow = dest.getLastRow();
   if (lastRow < 2) { Logger.log('recomputeResultsOnly_CampaignLevel: no data rows.'); return; }
 
@@ -544,10 +559,11 @@ function recomputeCtrLinkHistory_CampaignLevel() {
 // window in "data - by day" and re-inserts the fresh pull, so recent days get
 // corrected (late attribution) and any missed day self-heals. Idempotent.
 function copyDataOnceADay(sinceStr, untilStr) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = getCampaignSpreadsheet_();
   var src = ss.getSheetByName('test-fb');
+  if (!src) src = ss.insertSheet('test-fb');
   var dest = ss.getSheetByName('data - by day');
-  if (!src || !dest) { Logger.log('copyDataOnceADay: a sheet is missing'); return; }
+  if (!dest) dest = ss.insertSheet('data - by day');
 
   var srcLast = src.getLastRow();
   if (srcLast < 2) { Logger.log('copyDataOnceADay: test-fb empty'); return; }

@@ -256,8 +256,9 @@ function getDashboardData(filters) {
 
     // 1) row-level filters
     let filteredRows = rows.filter(function (row) {
-      if (filters.accountId && filters.accountId !== 'ALL') {
-        if (row.accountId && row.accountId !== filters.accountId) return false;
+      var selectedAccounts = filters.accountIds || (filters.accountId ? [filters.accountId] : []);
+      if (selectedAccounts.length > 0 && selectedAccounts.indexOf('ALL') === -1) {
+        if (row.accountId && selectedAccounts.indexOf(row.accountId) === -1) return false;
       }
       if (filters.search) {
         if (row.campaignName.toLowerCase().indexOf(String(filters.search).toLowerCase()) === -1) return false;
@@ -815,6 +816,31 @@ function fetchTodayLiveAdsFromMeta_(dateStr) {
 }
 
 // ── SHEET ACCESS ──────────────────────────────────────────────────────────────
+function getCampaignSpreadsheet_() {
+  if (typeof getSheet_ === 'function') {
+    try {
+      var sh = getSheet_();
+      if (sh) return sh.getParent();
+    } catch (e) {}
+  }
+  var id = (typeof getCampaignSheetId_ === 'function' ? getCampaignSheetId_() : null) ||
+           (typeof PropertiesService !== 'undefined' ? PropertiesService.getScriptProperties().getProperty('CAMPAIGN_SHEET_ID') : null) ||
+           (typeof SHEET_ID !== 'undefined' ? SHEET_ID : null);
+  if (id && id !== 'YOUR_SPREADSHEET_ID' && id !== '[SHEET_ID]') {
+    try {
+      return SpreadsheetApp.openById(id);
+    } catch (e) {}
+  }
+  var ss = null;
+  try {
+    ss = SpreadsheetApp.getActiveSpreadsheet();
+  } catch (e) {}
+  if (!ss) {
+    throw new Error('Chưa kết nối Campaign Sheet. Hãy chạy hàm initSetupGoogleSheets() trong file Config.gs trước.');
+  }
+  return ss;
+}
+
 function getSheet_() {
   var id = (typeof getCampaignSheetId_ === 'function' ? getCampaignSheetId_() : null) || SHEET_ID;
   var ss;
@@ -914,9 +940,19 @@ function getBreakdownData(breakdownType, filters) {
     default: return { error: 'Invalid breakdown type: ' + breakdownType };
   }
 
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+  var ss;
+  try {
+    ss = getCampaignSpreadsheet_();
+  } catch (e) {
+    return { error: 'Chưa kết nối Campaign Sheet: ' + e.message };
+  }
+  if (!ss) {
+    return { error: 'Chưa kết nối Campaign Sheet. Hãy chạy hàm initSetupGoogleSheets() trong file Config.gs trước.' };
+  }
+
+  var sheet = ss.getSheetByName(sheetName);
   if (!sheet) {
-    return { error: 'Sheet "' + sheetName + '" not found. Run importBreakdownData() first.' };
+    return { error: 'Sheet "' + sheetName + '" chưa có dữ liệu. Hãy chạy importBreakdownData() trong Apps Script trước.' };
   }
 
   var data = sheet.getDataRange().getValues();
@@ -1026,6 +1062,7 @@ function getBreakdownData(breakdownType, filters) {
 //     on the frontend so it's not confused with the smarter campaign-level Results.
 
 var BREAKDOWN_SHEETS_ = { age: 'data_age', gender: 'data_gender', platform: 'data_platform', placement: 'data_placement', region: 'data_region' };
+var BREAKDOWN_HEADERS_ = ['Date', 'Campaign name', 'Breakdown Value', 'Spend', 'Impressions', 'Clicks', 'Reach', 'CTR', 'Purchases', 'Purchase value', 'Video 3s', 'Video 100%', 'Link clicks'];
 
 function getCustomReport(cfg) {
   cfg = cfg || {};
@@ -1037,11 +1074,37 @@ function getCustomReport(cfg) {
   if (!sheetName) {
     return { error: 'The "' + dim + '" breakdown has no data. Available: Age, Gender, Platform, Placement, Region.' };
   }
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
-  if (!sheet) return { error: 'Sheet "' + sheetName + '" not found. Run the breakdown backfill first (backfillRegionHistory() for Region).' };
+
+  var ss;
+  try {
+    ss = getCampaignSpreadsheet_();
+  } catch (e) {
+    return { error: 'Chưa kết nối Campaign Sheet: ' + e.message };
+  }
+  if (!ss) {
+    return { error: 'Chưa kết nối Campaign Sheet. Hãy chạy hàm initSetupGoogleSheets() trong file Config.gs trước.' };
+  }
+
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    // Tự động khởi tạo tab với tiêu đề chuẩn nếu chưa tồn tại
+    sheet = ss.insertSheet(sheetName);
+    sheet.getRange(1, 1, 1, BREAKDOWN_HEADERS_.length).setValues([BREAKDOWN_HEADERS_]);
+    return {
+      rows: [],
+      campaigns: (getReportCampaigns(cfg).campaigns || []),
+      note: 'Sheet "' + sheetName + '" đã được tự động tạo nhưng chưa có dữ liệu. Hãy chạy hàm importBreakdownData() hoặc syncTatCaDuLieu() để đồng bộ dữ liệu breakdown từ Meta Ads.'
+    };
+  }
 
   var data = sheet.getDataRange().getValues();
-  if (data.length < 2) return { rows: [], campaigns: [], note: '' };
+  if (data.length < 2) {
+    return {
+      rows: [],
+      campaigns: (getReportCampaigns(cfg).campaigns || []),
+      note: 'Sheet "' + sheetName + '" hiện chưa có dữ liệu. Hãy chạy hàm importBreakdownData() hoặc syncTatCaDuLieu() để đồng bộ dữ liệu breakdown từ Meta Ads.'
+    };
+  }
   return aggregateBreakdownData_(data, cfg, dim, dims.length > 1);
 }
 
@@ -1121,21 +1184,49 @@ function getReportCampaigns(cfg) {
   cfg = cfg || {};
   var dim = (cfg.breakdowns && cfg.breakdowns[0]) || 'age';
   var sheetName = BREAKDOWN_SHEETS_[dim] || 'data_age';
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
-  if (!sheet) return { campaigns: [] };
-  var data = sheet.getDataRange().getValues();
-  if (data.length < 2) return { campaigns: [] };
+  var ss;
+  try {
+    ss = getCampaignSpreadsheet_();
+  } catch (e) {
+    return { campaigns: [] };
+  }
+  if (!ss) return { campaigns: [] };
+
+  var set = {};
   var from = cfg.dateFrom ? new Date(cfg.dateFrom) : null;
   var to = cfg.dateTo ? new Date(cfg.dateTo) : null;
   if (to) to.setHours(23, 59, 59, 999);
-  var set = {};
-  data.slice(1).forEach(function (r) {
-    if (!r[0]) return;
-    var d = new Date(r[0]);
-    if (from && d < from) return;
-    if (to && d > to) return;
-    if (r[1]) set[String(r[1])] = true;
-  });
+
+  var sheet = ss.getSheetByName(sheetName);
+  if (sheet && sheet.getLastRow() >= 2) {
+    var data = sheet.getDataRange().getValues();
+    data.slice(1).forEach(function (r) {
+      if (!r[0]) return;
+      var d = new Date(r[0]);
+      if (from && d < from) return;
+      if (to && d > to) return;
+      if (r[1]) set[String(r[1]).trim()] = true;
+    });
+  } else {
+    // Fallback: Lấy danh sách Campaign từ sheet "data - by day"
+    var mainSheet = ss.getSheetByName(SHEET_NAME);
+    if (mainSheet && mainSheet.getLastRow() >= 2) {
+      var mData = mainSheet.getDataRange().getValues();
+      var hr = findHeaderRow_(mData);
+      var idx = resolveHeaders(mData[hr]);
+      mData.slice(hr + 1).forEach(function (r) {
+        var dateVal = idx.reportingEnds !== -1 ? r[idx.reportingEnds] : null;
+        if (dateVal) {
+          var d = new Date(dateVal);
+          if (from && d < from) return;
+          if (to && d > to) return;
+        }
+        var cname = idx.campaignName !== -1 ? r[idx.campaignName] : '';
+        if (cname) set[String(cname).trim()] = true;
+      });
+    }
+  }
+
   return { campaigns: Object.keys(set).sort() };
 }
 
@@ -1173,6 +1264,8 @@ function getAdSetData(campaignName, filters) {
       var dateStr = toDateString(g('reportingEnds'));
       var adset = String(g('adSetName') || '').trim() || '(unnamed ad set)';
       return {
+        accountId: String(g('accountId') || '').trim(),
+        accountName: String(g('accountName') || '').trim(),
         campaignName: adset,                                   // relabel: group by ad set
         _realCampaign: String(g('campaignName') || '').trim(),
         objective: String(g('objective') || '').trim() || 'Unknown',
@@ -1197,6 +1290,13 @@ function getAdSetData(campaignName, filters) {
     }).filter(function (row) {
       return row.campaignName !== '(unnamed ad set)' || row.spent || row.results || row.reach;
     });
+
+    var selectedAccounts = filters.accountIds || (filters.accountId ? [filters.accountId] : []);
+    if (selectedAccounts.length > 0 && selectedAccounts.indexOf('ALL') === -1) {
+      rows = rows.filter(function (r) {
+        return r.accountId && selectedAccounts.indexOf(r.accountId) !== -1;
+      });
+    }
 
     // distinct campaigns present (for the picker) — before the campaign filter
     var campSet = {};
@@ -1403,6 +1503,8 @@ function getAdData(filters) {
       var adName = idxAdName === -1 ? '' : String(r[idxAdName] || '').trim();
       var groupKey = adId || adName || '(unnamed ad)';
       return {
+        accountId: String(g('accountId') || '').trim(),
+        accountName: String(g('accountName') || '').trim(),
         campaignName: groupKey,                                // group-by key (reuses aggregateByCampaign_ unchanged)
         _adId: adId, _adName: adName || '(unnamed ad)',
         _realCampaign: String(g('campaignName') || '').trim(),
@@ -1428,6 +1530,13 @@ function getAdData(filters) {
     }).filter(function (row) {
       return row._adName !== '(unnamed ad)' || row.spent || row.results || row.reach;
     });
+
+    var selectedAccounts = filters.accountIds || (filters.accountId ? [filters.accountId] : []);
+    if (selectedAccounts.length > 0 && selectedAccounts.indexOf('ALL') === -1) {
+      rows = rows.filter(function (r) {
+        return r.accountId && selectedAccounts.indexOf(r.accountId) !== -1;
+      });
+    }
 
     // distinct campaigns present (for the picker) — before any filtering
     var campSetAll = {};

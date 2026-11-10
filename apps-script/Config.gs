@@ -19,6 +19,9 @@ var AD_ACCOUNTS = [
 // ID thư mục Google Drive của bạn
 var DRIVE_FOLDER_ID = '1WjwUW-4iyNrLLZHfDF9fpooqHrZkSCJg';
 
+// Tài khoản mặc định fallback
+var ACCOUNT_ID = AD_ACCOUNTS[0].id;
+
 /**
  * HÀM TỰ ĐỘNG TẠO 3 GOOGLE SHEETS TRONG THƯ MỤC GOOGLE DRIVE:
  * Chạy hàm này một lần duy nhất từ menu Run -> initSetupGoogleSheets()
@@ -100,4 +103,26 @@ function fetchCampaignSettings(accountId) {
     Logger.log('Lỗi fetchCampaignSettings cho ' + actId + ': ' + e.message);
     return {};
   }
+}
+
+/**
+ * HÀM 1-CLICK KÉO TOÀN BỘ DỮ LIỆU CẢ 8 TÀI KHOẢN (Campaign -> AdSet -> Ad -> Creative)
+ */
+function syncTatCaDuLieu() {
+  Logger.log('1/5: Đang đồng bộ Campaign...');
+  if (typeof importDataFromJSON === 'function') importDataFromJSON();
+
+  Logger.log('2/5: Đang đồng bộ Ad Set...');
+  if (typeof importAdSetData === 'function') importAdSetData();
+
+  Logger.log('3/5: Đang đồng bộ Ad...');
+  if (typeof importAdData === 'function') importAdData();
+
+  Logger.log('4/5: Đang cache Creative thumbnail...');
+  if (typeof importAdCreatives === 'function') importAdCreatives();
+
+  Logger.log('5/5: Đang đồng bộ dữ liệu Breakdown: Age, Gender, Platform, Placement, Region...');
+  if (typeof importBreakdownData === 'function') importBreakdownData();
+
+  Logger.log('===> HOÀN TẤT ĐỒNG BỘ DỮ LIỆU BAN ĐẦU!');
 }

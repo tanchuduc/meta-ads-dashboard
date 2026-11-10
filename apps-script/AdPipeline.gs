@@ -97,7 +97,7 @@ function diagnoseAd() {
 // function sidesteps that entirely, since by the time any function in this project actually
 // RUNS, every file's top-level vars are already initialized.
 function getAdHeaders_() {
-  return ['Ad ID', 'Ad name', 'Ad set name'].concat(CAMPAIGN_HEADERS_);
+  return ['Account ID', 'Account Name', 'Ad ID', 'Ad name', 'Ad set name'].concat(CAMPAIGN_HEADERS_.slice(2));
 }
 
 // ── DAILY (add a ~1–2am trigger): rolling window upsert ──
@@ -252,39 +252,44 @@ function backfillAdRange_(sheet, sinceStr, untilStr) {
 // AdSetPipeline.gs: callers must be able to tell "genuinely no data" from "the fetch
 // broke partway", so a bad day never silently wipes good existing rows.
 function fetchAdRows_(sinceStr, untilStr) {
-  var settings = fetchCampaignSettings(); // reused global (importDataFromJSON.gs) — campaign bid strategy/daily budget, keyed by campaign name
-  var params = {
-    level: 'ad',
-    time_increment: 1,
-    include_archived: true,
-    fields: 'ad_id,ad_name,adset_name,' + INSIGHT_FIELDS_,
-    time_range: JSON.stringify({ since: sinceStr, until: untilStr }),
-    limit: 500
-  };
-  var qs = Object.keys(params).map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(String(params[k])); }).join('&');
-  var base = 'https://graph.facebook.com/v18.0/' + ACCOUNT_ID + '/insights';
+  var accounts = (typeof AD_ACCOUNTS !== 'undefined' && AD_ACCOUNTS.length) ? AD_ACCOUNTS : [{ id: (typeof ACCOUNT_ID !== 'undefined' ? ACCOUNT_ID : ''), name: 'Default' }];
+  var out = [], anySuccess = false, lastError = '';
 
-  var next = null, out = [], errorMessage = '';
-  do {
-    var url = next ? next : base + '?' + qs;
-    var data = fetchWithRetry_(url);
-    if (!data || data.error) {
-      errorMessage = (data && data.error) ? JSON.stringify(data.error) : 'no response from fetchWithRetry_';
-      Logger.log('ad insights error: ' + errorMessage);
-      return { rows: out, ok: false, errorMessage: errorMessage };
-    }
-    (data.data || []).forEach(function (item) { out.push(buildAdRow_(item, settings)); });
-    next = (data.paging && data.paging.next) ? data.paging.next : null;
-    if (next) Utilities.sleep(500);
-  } while (next);
-  return { rows: out, ok: true, errorMessage: '' };
+  for (var i = 0; i < accounts.length; i++) {
+    var acc = accounts[i];
+    var settings = fetchCampaignSettings(acc.id);
+    var params = {
+      level: 'ad',
+      time_increment: 1,
+      include_archived: true,
+      fields: 'ad_id,ad_name,adset_name,' + INSIGHT_FIELDS_,
+      time_range: JSON.stringify({ since: sinceStr, until: untilStr }),
+      limit: 500
+    };
+    var qs = Object.keys(params).map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(String(params[k])); }).join('&');
+    var base = 'https://graph.facebook.com/v18.0/' + acc.id + '/insights';
+
+    var next = null;
+    do {
+      var url = next ? next : base + '?' + qs;
+      var data = fetchWithRetry_(url);
+      if (!data || data.error) {
+        lastError = (data && data.error) ? JSON.stringify(data.error) : 'no response from fetchWithRetry_';
+        Logger.log('ad insights error for ' + acc.name + ': ' + lastError);
+        break;
+      }
+      anySuccess = true;
+      (data.data || []).forEach(function (item) { out.push(buildAdRow_(item, settings, acc)); });
+      next = (data.paging && data.paging.next) ? data.paging.next : null;
+      if (next) Utilities.sleep(200);
+    } while (next);
+  }
+  return { rows: out, ok: anySuccess || out.length > 0 || !lastError, errorMessage: lastError };
 }
 
-// One 38-col row: [Ad ID, Ad name, Ad set name] + the same 35 columns the campaign/ad-set
-// builders produce (buildRowFromInsight_ shared from DataPipeline.gs).
-function buildAdRow_(item, campaignSettings) {
-  var base = buildRowFromInsight_(item, campaignSettings); // 35 cols, campaign bid strategy/budget filled via item.campaign_name
-  return [item.ad_id || '', item.ad_name || '', item.adset_name || ''].concat(base);
+function buildAdRow_(item, campaignSettings, acc) {
+  var base = buildRowFromInsight_(item, campaignSettings, acc);
+  return [base[0], base[1], item.ad_id || '', item.ad_name || '', item.adset_name || ''].concat(base.slice(2));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -474,7 +479,7 @@ function removeAdRowsInRange_(sheet, sinceStr, untilStr) {
   var s = new Date(sinceStr).getTime();
   var u = new Date(untilStr).getTime() + 86399999;
   var kept = vals.filter(function (r) {
-    var ts = new Date(dayKey_(r[7])).getTime();
+    var ts = new Date(dayKey_(r[9])).getTime();
     if (isNaN(ts)) return true;
     return !(ts >= s && ts <= u);
   });
