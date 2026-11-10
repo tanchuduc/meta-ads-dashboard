@@ -214,16 +214,25 @@ function alertAdSetImportFailing_(streak, errorMessage) {
 function backfillAdSetHistory() {
   var sheet = getAdSetSheet_();
   ensureAdSetHeaders_(sheet);
+  var until = getYesterday();
+  if (typeof runAsyncBackfillJob_ === 'function') {
+    return runAsyncBackfillJob_({
+      pipeline: 'adset',
+      since: '2025-11-13',
+      until: until,
+      chunkDays: 7,
+      autoResume: true
+    });
+  }
   var start = new Date('2025-11-13');
-  var end = new Date(getYesterday());
+  var end = new Date(until);
   var cur = new Date(start.getFullYear(), start.getMonth(), 1);
   var monthCount = 0;
   while (cur <= end) {
     var mStart = new Date(Math.max(new Date(cur.getFullYear(), cur.getMonth(), 1).getTime(), start.getTime()));
     var mEnd = new Date(Math.min(new Date(cur.getFullYear(), cur.getMonth() + 1, 0).getTime(), end.getTime()));
-    backfillAdSetData(dayKey_(mStart), dayKey_(mEnd));
+    backfillAdSetData(dayKey_(mStart), dayKey_(mEnd), { syncOnly: true });
     monthCount++;
-    // Wait 5 seconds between months to avoid rate limits
     if (cur < end) Utilities.sleep(5000);
     cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
   }
@@ -234,9 +243,20 @@ function backfillAdSetHistory() {
 // window if the fetch actually succeeded. On failure this leaves the window exactly as
 // it was (matches "nothing happened" rather than "silently emptied"), logs clearly, and
 // returns — safe to just call again once the underlying issue is fixed.
-function backfillAdSetData(sinceStr, untilStr) {
+function backfillAdSetData(sinceStr, untilStr, opts) {
+  opts = opts || {};
   var sheet = getAdSetSheet_();
   ensureAdSetHeaders_(sheet);
+  if (!opts.syncOnly && typeof runAsyncBackfillJob_ === 'function') {
+    return runAsyncBackfillJob_({
+      pipeline: 'adset',
+      since: sinceStr,
+      until: untilStr,
+      chunkDays: opts.chunkDays || 7,
+      autoResume: opts.autoResume !== false,
+      deadlineMs: opts.deadlineMs
+    });
+  }
   var result = fetchAdSetRows_(sinceStr, untilStr);
   if (!result.ok) {
     Logger.log('backfillAdSetData ' + sinceStr + '..' + untilStr + ': fetch failed (' + result.errorMessage +
@@ -626,16 +646,25 @@ function ensureAdSetHeaders_(sheet) {
   if (blank) sheet.getRange(1, 1, 1, ADSET_HEADERS_.length).setValues([ADSET_HEADERS_]);
 }
 
-// Date lives in column 6 ("Reporting ends") in the ad-set layout (index 5).
-function removeAdSetRowsInRange_(sheet, sinceStr, untilStr) {
+// Date lives in column 8 ("Reporting ends") in the ad-set layout (index 7); col 0 = Account ID.
+function removeAdSetRowsInRange_(sheet, sinceStr, untilStr, accountIdSet) {
   var last = sheet.getLastRow();
   if (last < 2) return;
   var lastCol = sheet.getLastColumn();
   var vals = sheet.getRange(2, 1, last - 1, lastCol).getValues();
-  var s = new Date(sinceStr).getTime();
-  var u = new Date(untilStr).getTime() + 86399999;
+  var useIsoRange = /^\d{4}-\d{2}-\d{2}$/.test(sinceStr) && /^\d{4}-\d{2}-\d{2}$/.test(untilStr);
+  var s = useIsoRange ? 0 : new Date(sinceStr).getTime();
+  var u = useIsoRange ? 0 : (new Date(untilStr).getTime() + 86399999);
   var kept = vals.filter(function (r) {
-    var ts = new Date(dayKey_(r[7])).getTime();
+    if (accountIdSet) {
+      var rowAccId = String(r[0] || '').trim();
+      if (!accountIdSet[rowAccId]) return true;
+    }
+    var k = dayKey_(r[7]);
+    if (useIsoRange && /^\d{4}-\d{2}-\d{2}$/.test(k)) {
+      return !(k >= sinceStr && k <= untilStr);
+    }
+    var ts = new Date(k).getTime();
     if (isNaN(ts)) return true;
     return !(ts >= s && ts <= u);
   });
@@ -663,17 +692,26 @@ function appendRowsSafe_(sheet, rows) {
 }
 
 function backfillRemainingAdSetData() {
+  var until = getYesterday();
+  if (typeof runAsyncBackfillJob_ === 'function') {
+    return runAsyncBackfillJob_({
+      pipeline: 'adset',
+      since: '2026-06-01',
+      until: until,
+      chunkDays: 7,
+      autoResume: true
+    });
+  }
   var start = new Date('2026-06-01');
-  var end = new Date(getYesterday());
+  var end = new Date(until);
   var cur = new Date(start.getFullYear(), start.getMonth(), 1);
   var count = 0;
   while (cur <= end) {
     var mStart = new Date(cur.getFullYear(), cur.getMonth(), 1);
     var mEnd = new Date(cur.getFullYear(), cur.getMonth() + 1, 0);
     if (mEnd > end) mEnd = new Date(end);
-    backfillAdSetData(dayKey_(mStart), dayKey_(mEnd));
+    backfillAdSetData(dayKey_(mStart), dayKey_(mEnd), { syncOnly: true });
     count++;
-    // Wait 5 seconds between months to be kind to the rate limit
     if (cur < end) Utilities.sleep(5000);
     cur.setMonth(cur.getMonth() + 1);
   }

@@ -143,9 +143,9 @@ function buildRowFromInsight_(item, campaignSettings, acc) {
     name,                                  // 2  Campaign name
     item.objective || '',                  // 3  Objective
     item.attribution_setting || '',        // 4  Attribution setting
-    st.bid_strategy || '',                 // 5  Campaign bid strategy
+    st.bid_strategy || st.bidStrategy || '', // 5  Campaign bid strategy
     item.date_stop || '',                  // 6  Reporting ends
-    st.daily_budget || 0,                  // 7  Daily budget
+    st.daily_budget || st.dailyBudget || 0, // 7  Daily budget
     item.engagement_rate_ranking || '',    // 8  Engagement rate ranking
     item.quality_ranking || '',            // 9  Quality ranking
     frequency,                             // 10 Frequency
@@ -303,14 +303,24 @@ function backfillAug5to11() { backfillDateRange('2026-08-05', '2026-08-11'); }
 // Safe to re-run — backfillDateRange() clears each window before writing (idempotent).
 // Runs month-by-month with a pause between calls to be kind to the rate limit.
 function backfillAllHistory_CampaignLevel() {
+  var until = getYesterday();
+  if (typeof runAsyncBackfillJob_ === 'function') {
+    return runAsyncBackfillJob_({
+      pipeline: 'campaign',
+      since: '2025-11-13',
+      until: until,
+      chunkDays: 15,
+      autoResume: true
+    });
+  }
   var start = new Date('2025-11-13');
-  var end = new Date(getYesterday());
+  var end = new Date(until);
   var cur = new Date(start.getFullYear(), start.getMonth(), 1);
   var months = 0;
   while (cur <= end) {
     var mStart = new Date(Math.max(new Date(cur.getFullYear(), cur.getMonth(), 1).getTime(), start.getTime()));
     var mEnd = new Date(Math.min(new Date(cur.getFullYear(), cur.getMonth() + 1, 0).getTime(), end.getTime()));
-    backfillDateRange(dayKey_(mStart), dayKey_(mEnd));
+    backfillDateRange(dayKey_(mStart), dayKey_(mEnd), { syncOnly: true });
     months++;
     if (cur < end) Utilities.sleep(5000);
     cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
@@ -318,70 +328,29 @@ function backfillAllHistory_CampaignLevel() {
   Logger.log('backfillAllHistory_CampaignLevel: done ' + months + ' months, 2025-11-13 .. ' + dayKey_(end));
 }
 
-var CAMPAIGN_BACKFILL_TIME_BUDGET_MS_ = 270000;   // 4.5 min soft budget (Apps Script hard cap is 6 min)
-var CAMPAIGN_INSIGHTS_INITIAL_CHUNK_DAYS_ = 14;   // split multi-week/90-day queries proactively to avoid Meta code 1/99 & code 2/1504044 timeouts
+var CAMPAIGN_BACKFILL_TIME_BUDGET_MS_ = 240000;   // 4 min soft budget (Apps Script hard cap is 6 min)
+var CAMPAIGN_INSIGHTS_INITIAL_CHUNK_DAYS_ = 14;   // used only by sync fallback
 var CAMPAIGN_INSIGHTS_LIMIT_STEPS_ = [200, 100, 50, 25];
 
 /**
- * Kéo dữ liệu Campaign 30 ngày gần nhất (đến hôm qua) cho cả 9 tài khoản để bộ lọc "30 ngày qua" có đủ dữ liệu.
+ * Kéo dữ liệu Campaign 30 ngày gần nhất (đến hôm qua) cho cả 9 tài khoản.
+ * Dùng Meta Async Insights Report + checkpoint + trigger tự nối ca để không bao giờ timeout 1504044 hay 6 phút.
  */
 function backfillLast30Days() {
   var until = getYesterday();
   var since = getDateNDaysAgo_(30);
-  backfillDateRange(since, until, { deadlineMs: Date.now() + CAMPAIGN_BACKFILL_TIME_BUDGET_MS_ });
+  return backfillDateRange(since, until, { chunkDays: 15, autoResume: true });
 }
 
 /**
  * Kéo dữ liệu Campaign 90 ngày gần nhất (đến hôm qua) cho cả 9 tài khoản.
- * Chia theo từng cửa sổ 30 ngày (mới nhất trước) + adaptive chunking (14 ngày -> 7 -> 3 -> 1 ngày)
- * để tránh Meta Graph API timeout (code 1/99, code 2/1504044) và giới hạn 6 phút của Apps Script.
+ * Dùng Meta Async Insights Report (cửa sổ 15 ngày, mới nhất trước) + checkpoint + trigger tự nối ca.
+ * Chỉ cần bấm Chạy 1 lần — nếu vượt 4 phút, hệ thống tự hẹn trigger chạy tiếp sau 1 phút cho đến khi đủ 9/9 tài khoản.
  */
 function backfillLast90Days() {
   var until = getYesterday();
   var since = getDateNDaysAgo_(90);
-  var deadlineMs = Date.now() + CAMPAIGN_BACKFILL_TIME_BUDGET_MS_;
-  var settingsByAccount = {};
-  var windows = (typeof buildDateChunks_ === 'function')
-    ? buildDateChunks_(since, until, 30).reverse()
-    : [{ since: since, until: until }];
-
-  var totalRows = 0;
-  var completedWindows = 0;
-  var partialOrFailedWindows = [];
-  var stateByAccount = {};
-
-  for (var i = 0; i < windows.length; i++) {
-    var w = windows[i];
-    if (Date.now() >= deadlineMs) {
-      var remaining = windows.slice(i).map(function (rem) {
-        return "backfillDateRange('" + rem.since + "', '" + rem.until + "')";
-      });
-      Logger.log('⚠️ backfillLast90Days: đạt ngưỡng thời gian an toàn (~4.5 phút) sau ' + completedWindows +
-        '/' + windows.length + ' cửa sổ. Chạy tiếp các lệnh sau để hoàn tất phần còn lại: ' + remaining.join(' ; '));
-      break;
-    }
-
-    Logger.log('backfillLast90Days: cửa sổ ' + (i + 1) + '/' + windows.length + ' (' + w.since + '..' + w.until + ')');
-    var res = backfillDateRange(w.since, w.until, {
-      deadlineMs: deadlineMs,
-      settingsByAccount: settingsByAccount,
-      stateByAccount: stateByAccount
-    });
-    completedWindows++;
-    if (res) {
-      totalRows += (res.rowsCount || 0);
-      if (!res.ok) {
-        partialOrFailedWindows.push(w.since + '..' + w.until);
-      }
-    }
-    if (i < windows.length - 1 && Date.now() + 2000 < deadlineMs) {
-      Utilities.sleep(1000);
-    }
-  }
-
-  Logger.log('backfillLast90Days: hoàn tất ' + completedWindows + '/' + windows.length +
-    ' cửa sổ (' + since + '..' + until + '), tổng ' + totalRows + ' dòng' +
-    (partialOrFailedWindows.length ? '. Cửa sổ lỗi/thiếu một phần: ' + partialOrFailedWindows.join(', ') : '.'));
+  return backfillDateRange(since, until, { chunkDays: 15, autoResume: true });
 }
 
 function nextSmallerCampaignLimit_(currentLimit) {
@@ -536,6 +505,16 @@ function fetchCampaignRowsForAccount_(acc, settings, sinceStr, untilStr, opts) {
 
 function backfillDateRange(sinceStr, untilStr, opts) {
   opts = opts || {};
+  if (!opts.syncOnly && typeof runAsyncBackfillJob_ === 'function') {
+    return runAsyncBackfillJob_({
+      pipeline: 'campaign',
+      since: sinceStr,
+      until: untilStr,
+      chunkDays: opts.chunkDays || 15,
+      autoResume: opts.autoResume !== false,
+      deadlineMs: opts.deadlineMs
+    });
+  }
   var deadlineMs = opts.deadlineMs || (Date.now() + CAMPAIGN_BACKFILL_TIME_BUDGET_MS_);
   var settingsByAccount = opts.settingsByAccount || {};
   var stateByAccount = opts.stateByAccount || {};
@@ -893,14 +872,18 @@ function removeRowsInDateRange_(sheet, sinceStr, untilStr, accountIdSet) {
   if (lastRow < 2) return;
   var lastCol = sheet.getLastColumn();
   var values = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
-  var sinceTs = new Date(sinceStr).getTime();
-  var untilTs = new Date(untilStr).getTime() + 86399999;
+  var useIsoRange = /^\d{4}-\d{2}-\d{2}$/.test(sinceStr) && /^\d{4}-\d{2}-\d{2}$/.test(untilStr);
+  var sinceTs = useIsoRange ? 0 : new Date(sinceStr).getTime();
+  var untilTs = useIsoRange ? 0 : (new Date(untilStr).getTime() + 86399999);
   var kept = values.filter(function (row) {
     if (accountIdSet) {
       var rowAccId = String(row[0] || '').trim();
       if (!accountIdSet[rowAccId]) return true;
     }
     var k = dayKey_(row[6]);        // col 7 = Reporting ends
+    if (useIsoRange && /^\d{4}-\d{2}-\d{2}$/.test(k)) {
+      return !(k >= sinceStr && k <= untilStr);
+    }
     var ts = new Date(k).getTime();
     if (isNaN(ts)) return true;     // keep undated rows
     return !(ts >= sinceTs && ts <= untilTs);

@@ -164,9 +164,11 @@ function sanitizeUser_(u) {
     email: String(u.email || ''),
     displayName: String(u.displayName || u.username || ''),
     role: role,
+    isSuperAdmin: role === 'SUPER_ADMIN',
     allowedAccountIds: role === 'SUPER_ADMIN'
       ? ['ALL']
       : (Array.isArray(u.allowedAccountIds) ? u.allowedAccountIds.slice() : []),
+    allowedAccounts: getAllowedAccountObjects_(u),
     isActive: u.isActive !== false,
     hasPassword: !!(u.passwordHash && u.salt),
     createdAt: u.createdAt || '',
@@ -571,12 +573,70 @@ function isUnfilteredSuperAdmin_(filters, authUser) {
 
 // ── PUBLIC AUTH ENDPOINTS ────────────────────────────────────────────────────
 
+function getActiveGasSessionEmail_() {
+  try {
+    var email = Session.getActiveUser().getEmail();
+    return String(email || '').trim().toLowerCase();
+  } catch (e) {
+    return '';
+  }
+}
+
 function getAuthConfig() {
-  ensureDefaultUsers_();
+  var users = ensureDefaultUsers_();
   var clientId = (typeof getGoogleOAuthClientId_ === 'function') ? getGoogleOAuthClientId_() : '';
+  var activeEmail = getActiveGasSessionEmail_();
+  var gasUser = activeEmail ? findUserByIdentifier_(users, activeEmail) : null;
+  var gasSessionEmail = (gasUser && gasUser.isActive !== false) ? activeEmail : '';
   return {
     googleEnabled: !!clientId,
-    googleClientId: clientId
+    googleClientId: clientId,
+    gasSessionEmail: gasSessionEmail,
+    gasSessionDisplayName: gasSessionEmail ? String(gasUser.displayName || gasUser.username || '') : ''
+  };
+}
+
+/**
+ * Dang nhap nhanh 1-click bang phien Google Apps Script hien tai
+ * (chi hoat dong khi Google Apps Script tra ve email cua nguoi dung hop le qua Session.getActiveUser).
+ */
+function loginWithGasSession() {
+  var activeEmail = getActiveGasSessionEmail_();
+  if (!activeEmail) {
+    return {
+      ok: false,
+      sessionToken: '',
+      user: null,
+      error: 'Không nhận diện được phiên Google Apps Script. Vui lòng đăng nhập bằng tài khoản & mật khẩu.'
+    };
+  }
+
+  var users = ensureDefaultUsers_();
+  var user = findUserByIdentifier_(users, activeEmail);
+  if (!user) {
+    return {
+      ok: false,
+      sessionToken: '',
+      user: null,
+      error: 'Email "' + activeEmail + '" chưa được cấp quyền truy cập dashboard.'
+    };
+  }
+  if (user.isActive === false) {
+    return {
+      ok: false,
+      sessionToken: '',
+      user: null,
+      error: 'Tài khoản "' + activeEmail + '" đã bị vô hiệu hóa.'
+    };
+  }
+
+  var sessionToken = createSession_(user.username);
+  touchUserLastLogin_(user.username);
+  return {
+    ok: true,
+    sessionToken: sessionToken,
+    user: sanitizeUser_(user),
+    error: null
   };
 }
 

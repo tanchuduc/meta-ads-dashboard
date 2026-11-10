@@ -3734,6 +3734,31 @@ thead th.col-campaignName {
   font-family: var(--font-mono);
   font-size: 11px;
 }
+.auth-gas-btn {
+  width: 100%;
+  height: 44px;
+  border: 1px solid var(--slate-300);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--slate-800);
+  font-size: 13px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  cursor: pointer;
+  transition: background .15s, border-color .15s, box-shadow .15s;
+}
+.auth-gas-btn:hover {
+  background: var(--slate-50);
+  border-color: var(--meta-blue);
+  box-shadow: 0 2px 6px rgba(8, 102, 255, 0.1);
+}
+.auth-gas-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
 .auth-divider {
   display: flex;
   align-items: center;
@@ -4565,18 +4590,14 @@ thead th.col-campaignName {
           <span id="authErrorText"></span>
         </div>
 
-        <!-- Method A: Google Sign-In (Super Admin) -->
-        <div class="auth-google-section" id="authGoogleSignInSection">
+        <!-- Method A: Google Quick Sign-In (Apps Script Session or GSI) -->
+        <div class="auth-google-section" id="authGoogleSignInSection" style="display:none">
           <div class="auth-section-label"><i class="fa-brands fa-google" aria-hidden="true"></i> Đăng nhập nhanh (Super Admin)</div>
-          <div class="auth-google-btn-wrap" id="googleSignInBtnContainer">
-            <span style="font-size:12px;color:var(--slate-500)"><i class="fas fa-circle-notch fa-spin" style="margin-right:6px"></i>Đang kiểm tra Google Sign-In&hellip;</span>
-          </div>
-          <div class="auth-google-guide" id="authGoogleSetupGuide">
-            <b>Chưa cấu hình Google Sign-In:</b> Super Admin cần thiết lập thuộc tính <code>GOOGLE_OAUTH_CLIENT_ID</code> trong Script Properties / <code>Config.gs</code> để bật nút đăng nhập Google. Trong lúc chờ, bạn vẫn có thể đăng nhập bằng tài khoản &amp; mật khẩu bên dưới.
-          </div>
+          <div class="auth-google-btn-wrap" id="googleSignInBtnContainer"></div>
+          <div class="auth-google-guide" id="authGoogleSetupGuide" style="display:none"></div>
         </div>
 
-        <div class="auth-divider">hoặc tài khoản &amp; mật khẩu</div>
+        <div class="auth-divider" id="authDivider" style="display:none">hoặc tài khoản &amp; mật khẩu</div>
 
         <!-- Method B: Username / Email & Password -->
         <form id="passwordLoginForm" onsubmit="submitPasswordLogin(event)" novalidate>
@@ -4584,7 +4605,7 @@ thead th.col-campaignName {
             <label for="loginUsername">Tên đăng nhập hoặc Email</label>
             <div class="auth-input-wrap">
               <i class="fas fa-user field-icon" aria-hidden="true"></i>
-              <input type="text" id="loginUsername" name="username" autocomplete="username" placeholder="vd: alpha_manager hoặc email" required>
+              <input type="text" id="loginUsername" name="username" autocomplete="username" placeholder="vd: alpha hoặc email" required>
             </div>
           </div>
 
@@ -10070,8 +10091,10 @@ function bootstrapAuth_() {
   if (isDemo()) {
     var demoBox = document.getElementById('authDemoModeBox');
     if (demoBox) demoBox.style.display = 'block';
-    var gCont = document.getElementById('googleSignInBtnContainer');
-    if (gCont) gCont.innerHTML = '<span style="font-size:12px;color:var(--slate-500)"><i class="fas fa-circle-info" style="margin-right:6px;color:var(--meta-blue)"></i>Google Sign-In chỉ khả dụng khi deploy trên Google Apps Script.</span>';
+    var gSec = document.getElementById('authGoogleSignInSection');
+    var gDiv = document.getElementById('authDivider');
+    if (gSec) gSec.style.display = 'none';
+    if (gDiv) gDiv.style.display = 'none';
     if (existingToken === 'demo_super_admin' || existingToken === 'demo_admin_alpha') {
       var targetUsername = (existingToken === 'demo_super_admin') ? 'tanchuducbk' : 'alpha_manager';
       var demoU = DEMO_USERS_DB_.find(function(u){ return u.username === targetUsername && u.isActive; });
@@ -10134,16 +10157,74 @@ function loadAuthConfig_() {
 }
 
 function applyAuthConfig_(cfg) {
+  var sec = document.getElementById('authGoogleSignInSection');
+  var div = document.getElementById('authDivider');
   var btnCont = document.getElementById('googleSignInBtnContainer');
   var guide = document.getElementById('authGoogleSetupGuide');
+  if (guide) guide.style.display = 'none';
+
+  if (cfg && cfg.gasSessionEmail) {
+    if (sec) sec.style.display = 'block';
+    if (div) div.style.display = 'flex';
+    if (btnCont) {
+      btnCont.style.display = 'flex';
+      btnCont.style.padding = '0';
+      btnCont.style.background = 'transparent';
+      btnCont.style.border = 'none';
+      btnCont.innerHTML =
+        '<button type="button" class="auth-gas-btn" id="gasQuickLoginBtn" onclick="loginWithGasSessionClick()">' +
+          '<i class="fa-brands fa-google" style="color:#EA4335;font-size:15px" aria-hidden="true"></i>' +
+          '<span>Đăng nhập nhanh (' + esc(cfg.gasSessionEmail) + ')</span>' +
+        '</button>';
+    }
+    return;
+  }
+
   if (cfg && cfg.googleEnabled && cfg.googleClientId) {
-    if (btnCont) btnCont.style.display = 'flex';
-    if (guide) guide.style.display = 'none';
+    if (sec) sec.style.display = 'block';
+    if (div) div.style.display = 'flex';
+    if (btnCont) {
+      btnCont.style.display = 'flex';
+      btnCont.style.padding = '8px';
+      btnCont.style.background = 'var(--slate-50)';
+      btnCont.style.border = '1px solid var(--border)';
+    }
     loadGoogleGsiAndRender_(cfg.googleClientId);
   } else {
-    if (btnCont) btnCont.style.display = 'none';
-    if (guide) guide.style.display = 'block';
+    if (sec) sec.style.display = 'none';
+    if (div) div.style.display = 'none';
   }
+}
+
+function loginWithGasSessionClick() {
+  if (isDemo()) return;
+  showAuthError_('');
+  var btn = document.getElementById('gasQuickLoginBtn');
+  var prevHtml = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-circle-notch fa-spin" aria-hidden="true"></i> <span>Đang đăng nhập Google&hellip;</span>';
+  }
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = prevHtml;
+      }
+      if (res && res.ok && res.sessionToken && res.user) {
+        enterDashboardAfterLogin_(res.user, res.sessionToken);
+      } else {
+        showAuthError_((res && res.error) || 'Không thể đăng nhập bằng phiên Google hiện tại.');
+      }
+    })
+    .withFailureHandler(function(err) {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = prevHtml;
+      }
+      showAuthError_('Lỗi đăng nhập Google: ' + ((err && err.message) || String(err)));
+    })
+    .loginWithGasSession();
 }
 
 function loadGoogleGsiAndRender_(clientId) {

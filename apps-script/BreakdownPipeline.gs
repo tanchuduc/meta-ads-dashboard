@@ -77,17 +77,26 @@ function getOrCreateBreakdownSheet_(sheetName) {
 }
 
 /**
- * Xóa dữ liệu cũ trong khoảng thời gian để ghi đè (idempotent, tránh trùng lặp)
+ * Xóa dữ liệu cũ trong khoảng thời gian để ghi đè (idempotent, tránh trùng lặp).
+ * Khi truyền accountIdSet, chỉ xóa dữ liệu của các tài khoản nằm trong tập đó (col 13 = Account ID).
  */
-function removeBreakdownRowsInRange_(sheet, sinceStr, untilStr) {
+function removeBreakdownRowsInRange_(sheet, sinceStr, untilStr, accountIdSet) {
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return;
   var lastCol = sheet.getLastColumn();
   var values = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
-  var sinceTs = new Date(sinceStr).getTime();
-  var untilTs = new Date(untilStr).getTime() + 86399999;
+  var useIsoRange = /^\d{4}-\d{2}-\d{2}$/.test(sinceStr) && /^\d{4}-\d{2}-\d{2}$/.test(untilStr);
+  var sinceTs = useIsoRange ? 0 : new Date(sinceStr).getTime();
+  var untilTs = useIsoRange ? 0 : (new Date(untilStr).getTime() + 86399999);
   var kept = values.filter(function (row) {
+    if (accountIdSet) {
+      var rowAccId = String(row[13] || '').trim();
+      if (!accountIdSet[rowAccId]) return true;
+    }
     var k = dayKey_(row[0]); // col 1 = Date
+    if (useIsoRange && /^\d{4}-\d{2}-\d{2}$/.test(k)) {
+      return !(k >= sinceStr && k <= untilStr);
+    }
     var ts = new Date(k).getTime();
     if (isNaN(ts)) return true;
     return !(ts >= sinceTs && ts <= untilTs);
@@ -97,7 +106,8 @@ function removeBreakdownRowsInRange_(sheet, sinceStr, untilStr) {
   if (kept.length) {
     sheet.getRange(2, 1, kept.length, kept[0].length).setValues(kept);
   }
-  Logger.log('removeBreakdownRowsInRange_ (' + sheet.getName() + '): cleared ' + removed + ' rows in ' + sinceStr + '..' + untilStr);
+  Logger.log('removeBreakdownRowsInRange_ (' + sheet.getName() + '): cleared ' + removed + ' rows in ' + sinceStr + '..' + untilStr +
+    (accountIdSet ? ' (scoped to ' + Object.keys(accountIdSet).length + ' account(s))' : ''));
 }
 
 /**
@@ -257,14 +267,34 @@ function importBreakdownData() {
 }
 
 /**
- * Backfill theo khoảng thời gian tùy chọn
+ * Backfill theo khoảng thời gian tùy chọn (dùng Async Report + checkpoint + tự nối ca).
  */
-function backfillBreakdownsCustomRange(sinceStr, untilStr) {
+function backfillBreakdownsCustomRange(sinceStr, untilStr, opts) {
+  opts = opts || {};
+  if (!opts.syncOnly && typeof runAsyncBackfillJob_ === 'function') {
+    return runAsyncBackfillJob_({
+      pipeline: 'breakdown',
+      since: sinceStr,
+      until: untilStr,
+      chunkDays: opts.chunkDays || 7,
+      breakdownTypes: opts.breakdownTypes || ['age', 'gender', 'platform', 'placement', 'region'],
+      autoResume: opts.autoResume !== false,
+      deadlineMs: opts.deadlineMs
+    });
+  }
   Logger.log('Bắt đầu backfill Breakdowns từ ' + sinceStr + ' đến ' + untilStr);
-  var types = ['age', 'gender', 'platform', 'placement', 'region'];
+  var types = opts.breakdownTypes || ['age', 'gender', 'platform', 'placement', 'region'];
   types.forEach(function (t) {
     importOneBreakdownRange_(t, sinceStr, untilStr);
     Utilities.sleep(1000);
   });
   Logger.log('Hoàn tất backfill Breakdowns: ' + sinceStr + ' .. ' + untilStr);
+}
+
+function backfillLast30Days_Breakdowns() {
+  return backfillBreakdownsCustomRange(getDateNDaysAgo_(30), getYesterday());
+}
+
+function backfillLast90Days_Breakdowns() {
+  return backfillBreakdownsCustomRange(getDateNDaysAgo_(90), getYesterday());
 }

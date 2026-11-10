@@ -384,11 +384,27 @@ function getDashboardData(filters, sessionToken) {
     // 1) row-level filters (using effectiveAccounts enforced by RBAC)
     const fromTs = filters.dateFrom ? tsOf(filters.dateFrom) : -Infinity;
     const toTs = filters.dateTo ? (tsOf(filters.dateTo) + 86399999) : Infinity;
+    const targetCampNames = Array.isArray(filters.campaignNames) ? filters.campaignNames.filter(Boolean) : [];
 
-    let filteredRows = authorizedRows.filter(function (row) {
+    const accountScopedRows = authorizedRows.filter(function (row) {
       if (row.accountId || row.accountName) {
-        if (!rowMatchesAccounts_(row.accountId, row.accountName, effectiveAccounts)) return false;
-      } else if (!allowUnknownForSuperAdmin) {
+        return rowMatchesAccounts_(row.accountId, row.accountName, effectiveAccounts);
+      }
+      return allowUnknownForSuperAdmin;
+    });
+
+    const campMetaMap = {};
+    accountScopedRows.forEach(function (r) {
+      if (r.campaignName && r.campaignName !== '(unnamed)' && !campMetaMap[r.campaignName]) {
+        campMetaMap[r.campaignName] = r.accountName || r.accountId || '';
+      }
+    });
+    const allCampaignMeta = Object.keys(campMetaMap).sort().map(function (name) {
+      return { name: name, accountName: campMetaMap[name] };
+    });
+
+    let filteredRows = accountScopedRows.filter(function (row) {
+      if (targetCampNames.length && targetCampNames.indexOf(row.campaignName) === -1) {
         return false;
       }
       if (filters.search) {
@@ -441,8 +457,9 @@ function getDashboardData(filters, sessionToken) {
       missing: missing,
       sheetName: sheet.getName(),
       generatedAt: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm'),
-      // All campaign names within user's authorized accounts — feeds Search Campaign autocomplete
-      allCampaignNames: distinctCampaignNames_(authorizedRows),
+      // All campaign names within user's selected accounts — feeds Search Campaign selector
+      allCampaignNames: distinctCampaignNames_(accountScopedRows),
+      allCampaignMeta: allCampaignMeta,
       error: null
     };
 
@@ -1303,6 +1320,9 @@ function aggregateBreakdownData_(data, cfg, dim, multiDimsRequested, authContext
   var to = cfg.dateTo ? new Date(cfg.dateTo) : null;
   if (to) to.setHours(23, 59, 59, 999);
   var campaign = (cfg.campaignName || '').trim();
+  var targetCampaigns = (Array.isArray(cfg.campaignNames) && cfg.campaignNames.length)
+    ? cfg.campaignNames.filter(Boolean)
+    : (campaign ? [campaign] : []);
   // Region-only free-text filter (e.g. "Metro Manila") — matches the frontend's
   // "Region filter" input, which was already wired up ahead of this backend support.
   var regionFilter = (dim === 'region' && cfg.region) ? String(cfg.region).trim().toLowerCase() : '';
@@ -1328,7 +1348,7 @@ function aggregateBreakdownData_(data, cfg, dim, multiDimsRequested, authContext
     }
 
     if (cname) active[cname] = true;                 // campaigns active in this window (within authorized scope)
-    if (campaign && cname !== campaign) return;      // optional campaign filter
+    if (targetCampaigns.length && targetCampaigns.indexOf(cname) === -1) return; // optional campaign filter
     var key = String(r[2] || '(none)');
     if (regionFilter && key.toLowerCase().indexOf(regionFilter) === -1) return;
     if (!agg[key]) agg[key] = { spend: 0, impressions: 0, clicks: 0, reach: 0, purchases: 0, purchaseValue: 0, video3s: 0, video100: 0, linkClicks: 0 };
@@ -1551,8 +1571,29 @@ function getAdSetData(campaignName, filters, sessionToken) {
       });
     }
 
-    // Optional single-campaign filter (empty = ALL Ad Sets across selected accounts)
-    if (campaignName) rows = rows.filter(function (r) { return r._realCampaign === campaignName; });
+    // Optional campaign filter (empty = ALL Ad Sets across selected accounts)
+    var targetCampaigns = (Array.isArray(filters.campaignNames) && filters.campaignNames.length)
+      ? filters.campaignNames.filter(Boolean)
+      : (campaignName ? [campaignName] : []);
+    if (targetCampaigns.length) {
+      rows = rows.filter(function (r) { return targetCampaigns.indexOf(r._realCampaign) !== -1; });
+    }
+
+    // Distinct ad sets within current account/date/parent-campaign scope (feeds NQC searchable dropdown)
+    var adsetMetaMap = {};
+    rows.forEach(function (r) {
+      if (r.campaignName && r.campaignName !== '(unnamed ad set)' && !adsetMetaMap[r.campaignName]) {
+        adsetMetaMap[r.campaignName] = r._realCampaign || '';
+      }
+    });
+    var adsetList = Object.keys(adsetMetaMap).sort().map(function (name) {
+      return { name: name, campaignName: adsetMetaMap[name] };
+    });
+
+    var targetAdSets = Array.isArray(filters.adSetNames) ? filters.adSetNames.filter(Boolean) : [];
+    if (targetAdSets.length) {
+      rows = rows.filter(function (r) { return targetAdSets.indexOf(r.campaignName) !== -1; });
+    }
 
     if (filters.objective) {
       rows = rows.filter(function (r) { return r.objective === filters.objective; });
@@ -1581,12 +1622,12 @@ function getAdSetData(campaignName, filters, sessionToken) {
     var summary = buildSummary_(rows, adsets);
     return {
       accounts: allowedAccounts,
-      rows: rows, campaigns: adsets, campaignList: campaignList, summary: summary,
+      rows: rows, campaigns: adsets, campaignList: campaignList, adsetList: adsetList, summary: summary,
       generatedAt: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm'),
       error: null
     };
   } catch (e) {
-    return { accounts: allowedAccounts, rows: [], campaigns: [], campaignList: [], summary: emptySummary_(), error: e.message || String(e) };
+    return { accounts: allowedAccounts, rows: [], campaigns: [], campaignList: [], adsetList: [], summary: emptySummary_(), error: e.message || String(e) };
   }
 }
 
@@ -1682,6 +1723,9 @@ function getAdSetBreakdownData(campaignName, breakdownType, filters, sessionToke
   var from = filters.dateFrom ? new Date(filters.dateFrom) : null;
   var to = filters.dateTo ? new Date(filters.dateTo) : null;
   if (to) to.setHours(23, 59, 59, 999);
+  var targetCampaigns = (Array.isArray(filters.campaignNames) && filters.campaignNames.length)
+    ? filters.campaignNames.filter(Boolean)
+    : (campaignName ? [campaignName] : []);
 
   var agg = {};
   data.slice(1).forEach(function (r) {
@@ -1690,7 +1734,7 @@ function getAdSetBreakdownData(campaignName, breakdownType, filters, sessionToke
     if (from && d < from) return;
     if (to && d > to) return;
     var cname = hIdx.campaignName !== -1 ? String(r[hIdx.campaignName] || '').trim() : String(r[1] || '').trim();
-    if (campaignName && cname !== campaignName) return;
+    if (targetCampaigns.length && targetCampaigns.indexOf(cname) === -1) return;
 
     var rowAccId = hIdx.accountId !== -1 ? String(r[hIdx.accountId] || '').trim() : '';
     var rowAccName = hIdx.accountName !== -1 ? String(r[hIdx.accountName] || '').trim() : '';
@@ -1859,14 +1903,49 @@ function getAdData(filters, sessionToken) {
       });
     }
     // campaign filter (optional) — narrows BEFORE computing the ad-set list, so that
-    // dropdown scopes itself to whatever campaign is currently chosen
-    if (filters.campaignName) rows = rows.filter(function (r) { return r._realCampaign === filters.campaignName; });
+    // dropdown scopes itself to whatever campaign(s) are currently chosen
+    var targetCampaigns = (Array.isArray(filters.campaignNames) && filters.campaignNames.length)
+      ? filters.campaignNames.filter(Boolean)
+      : (filters.campaignName ? [filters.campaignName] : []);
+    if (targetCampaigns.length) {
+      rows = rows.filter(function (r) { return targetCampaigns.indexOf(r._realCampaign) !== -1; });
+    }
 
     var scopedAdsetSet = {};
-    rows.forEach(function (r) { if (r._realAdSet) scopedAdsetSet[r._realAdSet] = true; });
+    var adsetMetaMap = {};
+    rows.forEach(function (r) {
+      if (r._realAdSet) {
+        scopedAdsetSet[r._realAdSet] = true;
+        if (!adsetMetaMap[r._realAdSet]) adsetMetaMap[r._realAdSet] = r._realCampaign || '';
+      }
+    });
     var adsetList = Object.keys(scopedAdsetSet).sort();
+    var adsetMeta = adsetList.map(function (name) {
+      return { name: name, campaignName: adsetMetaMap[name] || '' };
+    });
 
-    if (filters.adSetName) rows = rows.filter(function (r) { return r._realAdSet === filters.adSetName; });
+    var targetAdSets = (Array.isArray(filters.adSetNames) && filters.adSetNames.length)
+      ? filters.adSetNames.filter(Boolean)
+      : (filters.adSetName ? [filters.adSetName] : []);
+    if (targetAdSets.length) {
+      rows = rows.filter(function (r) { return targetAdSets.indexOf(r._realAdSet) !== -1; });
+    }
+
+    // Distinct ads within current account/date/campaign/adset scope (feeds QC searchable dropdown)
+    var adMetaMap = {};
+    rows.forEach(function (r) {
+      var n = r._adName;
+      if (n && n !== '(unnamed ad)' && !adMetaMap[n]) {
+        adMetaMap[n] = { name: n, adSetName: r._realAdSet || '', campaignName: r._realCampaign || '' };
+      }
+    });
+    var adNameList = Object.keys(adMetaMap).sort().map(function (k) { return adMetaMap[k]; });
+
+    var targetAdNames = Array.isArray(filters.adNames) ? filters.adNames.filter(Boolean) : [];
+    if (targetAdNames.length) {
+      rows = rows.filter(function (r) { return targetAdNames.indexOf(r._adName) !== -1; });
+    }
+
     if (filters.search) {
       var needle = String(filters.search).toLowerCase().trim();
       rows = rows.filter(function (r) {
@@ -1938,13 +2017,13 @@ function getAdData(filters, sessionToken) {
     var summary = buildSummary_(rows, ads);
     return {
       accounts: allowedAccounts,
-      ads: ads, campaignList: campaignList, adsetList: adsetList, summary: summary,
+      ads: ads, campaignList: campaignList, adsetList: adsetList, adsetMeta: adsetMeta, adNameList: adNameList, summary: summary,
       creativeTypeCounts: creativeTypeCounts,
       generatedAt: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm'),
       error: null
     };
   } catch (e) {
-    return { accounts: allowedAccounts, ads: [], campaignList: [], adsetList: [], summary: emptySummary_(), error: e.message || String(e) };
+    return { accounts: allowedAccounts, ads: [], campaignList: [], adsetList: [], adsetMeta: [], adNameList: [], summary: emptySummary_(), error: e.message || String(e) };
   }
 }
 

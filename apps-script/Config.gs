@@ -99,26 +99,50 @@ function getAdSheetId_() {
 }
 
 /**
- * Lấy cấu hình các chiến dịch (objective, bid strategy, daily budget) theo từng tài khoản
+ * Lấy cấu hình các chiến dịch (objective, bid strategy, daily budget) theo từng tài khoản (có phân trang & retry)
  */
 function fetchCampaignSettings(accountId) {
   var actId = accountId || (AD_ACCOUNTS[0] ? AD_ACCOUNTS[0].id : '');
-  var url = 'https://graph.facebook.com/v18.0/' + actId +
+  var map = {};
+  var nextUrl = 'https://graph.facebook.com/v18.0/' + actId +
     '/campaigns?fields=id,name,objective,bid_strategy,daily_budget&limit=200';
+  var guard = 0;
+
   try {
-    var resp = UrlFetchApp.fetch(url, {
-      headers: { Authorization: 'Bearer ' + ACCESS_TOKEN },
-      muteHttpExceptions: true
-    });
-    var data = JSON.parse(resp.getContentText());
-    var map = {};
-    (data.data || []).forEach(function (c) {
-      map[c.name] = { id: c.id, objective: c.objective, bidStrategy: c.bid_strategy, dailyBudget: c.daily_budget };
-    });
+    while (nextUrl && guard < 25) {
+      var data;
+      if (typeof fetchWithRetry_ === 'function') {
+        data = fetchWithRetry_(nextUrl, 3);
+      } else {
+        var resp = UrlFetchApp.fetch(nextUrl, {
+          headers: { Authorization: 'Bearer ' + ACCESS_TOKEN },
+          muteHttpExceptions: true
+        });
+        data = JSON.parse(resp.getContentText());
+      }
+      if (!data || data.error) {
+        if (data && data.error) Logger.log('Lỗi fetchCampaignSettings cho ' + actId + ': ' + JSON.stringify(data.error));
+        break;
+      }
+      (data.data || []).forEach(function (c) {
+        var daily = c.daily_budget ? (parseFloat(c.daily_budget) || 0) : 0;
+        map[c.name] = {
+          id: c.id,
+          objective: c.objective || '',
+          bidStrategy: c.bid_strategy || '',
+          bid_strategy: c.bid_strategy || '',
+          dailyBudget: daily,
+          daily_budget: daily
+        };
+      });
+      nextUrl = (data.paging && data.paging.next) ? data.paging.next : null;
+      if (nextUrl) Utilities.sleep(150);
+      guard++;
+    }
     return map;
   } catch (e) {
     Logger.log('Lỗi fetchCampaignSettings cho ' + actId + ': ' + e.message);
-    return {};
+    return map;
   }
 }
 
