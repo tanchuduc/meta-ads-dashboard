@@ -601,6 +601,82 @@ select:focus-visible {
   color: var(--slate-900);
 }
 
+/* Searchable Multi-Select Filter Pickers (Campaign / Ad Set / Ad) */
+.filter-picker-wrap {
+  position: relative;
+}
+.filter-picker-wrap .dropdown-label {
+  font-size: 10.5px;
+  letter-spacing: 0.4px;
+  margin-bottom: 0;
+}
+.filter-picker-btn {
+  width: 100%;
+  justify-content: space-between;
+  min-height: 35px;
+  padding: 6px 12px;
+  background: var(--slate-50);
+  font-weight: 500;
+}
+.filter-picker-btn:hover {
+  background: var(--white);
+}
+.filter-picker-btn .trigger-left {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  flex: 1;
+}
+.filter-picker-btn .trigger-text {
+  max-width: none;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+.filter-picker-wrap.has-selection .filter-picker-btn {
+  background: var(--white);
+  border-color: var(--meta-blue);
+  font-weight: 600;
+}
+.filter-picker-popover {
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  padding: 14px;
+}
+.filter-picker-popover.align-right {
+  left: auto;
+  right: 0;
+}
+.popover-search input {
+  padding-right: 30px;
+}
+.popover-search-clear {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--slate-400);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px;
+  line-height: 1;
+}
+.popover-search-clear:hover {
+  color: var(--slate-700);
+}
+.popover-empty {
+  padding: 14px 10px;
+  font-size: 12px;
+  color: var(--slate-500);
+  text-align: center;
+}
+.filter-picker-popover .account-item-name {
+  word-break: break-word;
+}
+
 /* -------------------------------------------------------------------------- */
 /* 5. META ADS STYLE DATE RANGE POPOVER & DUAL CALENDAR                       */
 /* -------------------------------------------------------------------------- */
@@ -5011,18 +5087,9 @@ thead th.col-campaignName {
       <span class="hint" id="campaignsFilterHint">&mdash; lọc theo tên chiến dịch, ROAS hoặc mục tiêu; bấm &ldquo;Nhóm QC &rarr;&rdquo; để đào sâu</span>
     </div>
     <div class="filters-row">
-      <div class="filter-group" id="adsetCampaignFilterGroup" style="display:none;min-width:220px;flex:1.2">
-        <label for="adsetCampaign"><i class="fas fa-bullhorn" aria-hidden="true"></i> Chiến dịch cha</label>
-        <select id="adsetCampaign" onchange="selectAdSetCampaign(this.value)"><option value="">Tất cả chiến dịch</option></select>
-      </div>
-      <div class="filter-group" style="flex:1.5;min-width:240px;position:relative">
-        <label for="filterSearch" id="filterSearchLabel"><i class="fas fa-search" aria-hidden="true"></i> Tìm tên chiến dịch</label>
-        <div style="position:relative;display:flex;align-items:center;width:100%">
-          <input type="text" id="filterSearch" list="campaignSuggestions" autocomplete="off" placeholder="Gõ tên chiến dịch (Enter để lọc)&hellip;" oninput="onCampSearchInput(this.value)" onkeydown="onCampSearchKeydown(event)" style="padding-right:28px">
-          <button type="button" id="filterSearchClearBtn" onclick="clearCampSearch()" title="Xóa tìm kiếm" aria-label="Xóa tìm kiếm" style="display:none;position:absolute;right:8px;background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:13px;padding:2px"><i class="fas fa-times-circle" aria-hidden="true"></i></button>
-        </div>
-        <datalist id="campaignSuggestions"></datalist>
-      </div>
+      <div class="filter-group custom-dropdown-wrap filter-picker-wrap" id="adsetCampaignFilterGroup" style="display:none;min-width:220px;flex:1.2"></div>
+      <div class="filter-group custom-dropdown-wrap filter-picker-wrap" id="campPickerGroup" style="flex:1.5;min-width:240px"></div>
+      <div class="filter-group custom-dropdown-wrap filter-picker-wrap" id="adsetNamePickerGroup" style="display:none;flex:1.5;min-width:240px"></div>
       <div class="filter-group" style="display:none">
         <label for="filterDateFrom"><i class="fas fa-calendar"></i> Từ ngày</label>
         <input type="date" id="filterDateFrom">
@@ -5188,10 +5255,7 @@ thead th.col-campaignName {
           <label for="reportRegionFilter"><i class="fas fa-earth-asia" aria-hidden="true"></i> Lọc vùng miền (tùy chọn)</label>
           <input type="text" id="reportRegionFilter" placeholder="Ví dụ: Hà Nội, TP.HCM&hellip;">
         </div>
-        <div class="filter-group">
-          <label for="reportCampaign"><i class="fas fa-bullhorn" aria-hidden="true"></i> Chiến dịch (tùy chọn)</label>
-          <select id="reportCampaign"><option value="">Tất cả chiến dịch</option></select>
-        </div>
+        <div class="filter-group custom-dropdown-wrap filter-picker-wrap" id="reportCampPickerGroup" style="min-width:220px;flex:1.2"></div>
       </div>
       <div class="tp-title" style="margin-bottom:8px">Phân tích theo chiều (Breakdown by)</div>
       <div class="tp-grid" id="reportBreakdownGrid" style="margin-bottom:14px"></div>
@@ -5237,14 +5301,8 @@ thead th.col-campaignName {
   <div class="filters-bar" id="adsBar">
     <div class="filters-head"><i class="fas fa-rectangle-ad" aria-hidden="true"></i> Bộ Lọc Mẫu Quảng Cáo (Creative Lab) <span class="hint">&mdash; phân tích từng creative độc lập, so sánh Hook &amp; Hold Rate</span></div>
     <div class="filters-row">
-      <div class="filter-group">
-        <label for="adsCampaign"><i class="fas fa-bullhorn" aria-hidden="true"></i> Chiến dịch</label>
-        <select id="adsCampaign" onchange="onAdsCampaignChange()"><option value="">Tất cả chiến dịch</option></select>
-      </div>
-      <div class="filter-group">
-        <label for="adsAdSet"><i class="fas fa-layer-group" aria-hidden="true"></i> Nhóm quảng cáo</label>
-        <select id="adsAdSet" onchange="loadAdsData()"><option value="">Tất cả nhóm QC</option></select>
-      </div>
+      <div class="filter-group custom-dropdown-wrap filter-picker-wrap" id="adsCampPickerGroup" style="min-width:210px;flex:1.2"></div>
+      <div class="filter-group custom-dropdown-wrap filter-picker-wrap" id="adsAdSetPickerGroup" style="min-width:210px;flex:1.2"></div>
       <div class="filter-group">
         <label for="adsCreativeType"><i class="fas fa-photo-film" aria-hidden="true"></i> Định dạng Creative</label>
         <select id="adsCreativeType" onchange="loadAdsData()">
@@ -5255,10 +5313,7 @@ thead th.col-campaignName {
           <option value="Unknown" id="adsCreativeTypeUnknownOpt">Chưa xác định (0)</option>
         </select>
       </div>
-      <div class="filter-group">
-        <label for="adsSearch"><i class="fas fa-search" aria-hidden="true"></i> Tìm tên mẫu QC</label>
-        <input type="text" id="adsSearch" placeholder="Gõ để lọc (Enter để áp dụng)&hellip;" oninput="debouncedLoadAds_()" onkeydown="onAdsSearchKeydown(event)">
-      </div>
+      <div class="filter-group custom-dropdown-wrap filter-picker-wrap" id="adsNamePickerGroup" style="min-width:220px;flex:1.3"></div>
       <div class="filter-group" style="display:none">
         <label for="adsDateFrom">Từ ngày</label>
         <input type="date" id="adsDateFrom">
@@ -7672,6 +7727,9 @@ function closeAllPopovers(){
     accWrap.classList.remove('open');
     syncAccountCheckboxesFromState_();
   }
+  if(typeof closeAllMultiPickers_ === 'function'){
+    closeAllMultiPickers_();
+  }
   var dateWrap = document.getElementById('headerDatePickerWrap');
   if(dateWrap && dateWrap.classList.contains('open')){
     dateWrap.classList.remove('open');
@@ -8131,12 +8189,438 @@ function applyHeaderDateRange(){
   }
 }
 
+/* ==========================================================================
+   9B. BỘ LỌC TÌM KIẾM + CHỌN TỪ LIST ĐỀ XUẤT (CHIẾN DỊCH / NQC / QC)
+   ========================================================================== */
+var MULTI_PICKERS = {};
+
+function foldVi_(str){
+  var s = String(str || '').toLowerCase();
+  try {
+    s = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd');
+  } catch(e){}
+  return s;
+}
+
+function normalizeMultiPickerItems_(rawItems){
+  var seen = {};
+  var out = [];
+  (rawItems || []).forEach(function(item){
+    if(item == null) return;
+    var valStr = '', labelStr = '', subStr = '';
+    if(typeof item === 'string'){
+      valStr = item.trim();
+      labelStr = valStr;
+    } else if(typeof item === 'object'){
+      valStr = String(item.value != null ? item.value : (item.name != null ? item.name : (item.label || ''))).trim();
+      labelStr = String(item.label != null ? item.label : (item.name != null ? item.name : valStr)).trim();
+      if(item.sub != null){
+        subStr = String(item.sub).trim();
+      } else {
+        var parts = [];
+        if(item.adSetName) parts.push(item.adSetName);
+        if(item.campaignName) parts.push(item.campaignName);
+        if(item.accountName) parts.push(item.accountName);
+        subStr = parts.join(' · ');
+      }
+    }
+    if(!valStr || seen[valStr]) return;
+    seen[valStr] = true;
+    out.push({ value: valStr, label: labelStr || valStr, sub: subStr });
+  });
+  return out;
+}
+
+function initMultiPicker_(id, cfg){
+  var wrap = document.getElementById(cfg.wrapId);
+  if(!wrap) return;
+  MULTI_PICKERS[id] = {
+    id: id,
+    wrapId: cfg.wrapId,
+    label: cfg.label || 'Bộ lọc',
+    icon: cfg.icon || 'fa-filter',
+    allLabel: cfg.allLabel || 'Tất cả',
+    unitLabel: cfg.unitLabel || 'mục',
+    searchPlaceholder: cfg.searchPlaceholder || 'Tìm kiếm (Enter để chọn khớp)…',
+    emptyText: cfg.emptyText || 'Chưa có dữ liệu đề xuất.',
+    items: [],
+    selected: [],
+    onApply: cfg.onApply || function(){}
+  };
+  wrap.innerHTML =
+    '<label class="dropdown-label" for="'+id+'Btn"><i class="fas '+esc(cfg.icon||'fa-filter')+'" aria-hidden="true"></i> '+esc(cfg.label)+'</label>' +
+    '<button type="button" class="dropdown-trigger-btn filter-picker-btn" id="'+id+'Btn" onclick="toggleMultiPicker(\''+id+'\', event)">' +
+      '<span class="trigger-left">' +
+        '<span class="trigger-text" id="'+id+'BtnText">'+esc(cfg.allLabel || 'Tất cả')+'</span>' +
+        '<span class="badge" id="'+id+'Badge" style="display:none">0</span>' +
+      '</span>' +
+      '<i class="fas fa-chevron-down chevron" aria-hidden="true"></i>' +
+    '</button>' +
+    '<div class="custom-dropdown-popover filter-picker-popover" id="'+id+'Popover" onclick="event.stopPropagation()">' +
+      '<div class="popover-search">' +
+        '<i class="fas fa-search" aria-hidden="true"></i>' +
+        '<input type="text" id="'+id+'Search" autocomplete="off" aria-label="'+esc(cfg.label)+'" placeholder="'+esc(cfg.searchPlaceholder || 'Tìm kiếm (Enter để chọn khớp)…')+'" oninput="onMultiPickerSearchInput(\''+id+'\', this.value)" onkeydown="onMultiPickerSearchKeydown(\''+id+'\', event)">' +
+        '<button type="button" class="popover-search-clear" id="'+id+'SearchClear" onclick="clearMultiPickerSearch(\''+id+'\')" title="Xóa từ khóa" aria-label="Xóa từ khóa" style="display:none"><i class="fas fa-times-circle" aria-hidden="true"></i></button>' +
+      '</div>' +
+      '<div class="popover-quick-bar">' +
+        '<label class="quick-check-all">' +
+          '<input type="checkbox" id="'+id+'AllCheck" onchange="toggleMultiPickerSelectAll(\''+id+'\', this.checked)">' +
+          '<span id="'+id+'AllLabel">Chọn tất cả (0)</span>' +
+        '</label>' +
+        '<button type="button" class="text-link-btn" onclick="clearMultiPickerSelection(\''+id+'\')">Bỏ chọn</button>' +
+      '</div>' +
+      '<div class="popover-list" id="'+id+'List"></div>' +
+      '<div class="popover-footer">' +
+        '<span class="count-text" id="'+id+'Count">Mặc định: Tất cả (0)</span>' +
+        '<button type="button" class="btn-meta-apply" onclick="applyMultiPicker(\''+id+'\')">Áp dụng</button>' +
+      '</div>' +
+    '</div>';
+  renderMultiPickerList_(id);
+  updateMultiPickerUI_(id);
+}
+
+function initAllMultiPickers_(){
+  initMultiPicker_('campPicker', {
+    wrapId: 'campPickerGroup',
+    label: 'Chiến dịch',
+    icon: 'fa-bullhorn',
+    allLabel: 'Tất cả chiến dịch',
+    unitLabel: 'chiến dịch',
+    searchPlaceholder: 'Tìm tên chiến dịch (Enter để chọn khớp)…',
+    emptyText: 'Chưa có chiến dịch phù hợp.',
+    onApply: function(){ applyCampaignsTabFilters(); }
+  });
+  initMultiPicker_('adsetCampPicker', {
+    wrapId: 'adsetCampaignFilterGroup',
+    label: 'Chiến dịch cha',
+    icon: 'fa-bullhorn',
+    allLabel: 'Tất cả chiến dịch',
+    unitLabel: 'chiến dịch',
+    searchPlaceholder: 'Tìm chiến dịch cha (Enter để chọn khớp)…',
+    emptyText: 'Chưa có chiến dịch cha.',
+    onApply: function(vals){
+      adsetCampaign = (vals.length === 1) ? vals[0] : '';
+      updateCampaignDrilldownUI_();
+      loadAdSetData();
+    }
+  });
+  initMultiPicker_('adsetNamePicker', {
+    wrapId: 'adsetNamePickerGroup',
+    label: 'Nhóm quảng cáo (NQC)',
+    icon: 'fa-layer-group',
+    allLabel: 'Tất cả nhóm QC',
+    unitLabel: 'nhóm QC',
+    searchPlaceholder: 'Tìm tên nhóm QC (Enter để chọn khớp)…',
+    emptyText: 'Chưa có nhóm QC phù hợp.',
+    onApply: function(){ loadAdSetData(); }
+  });
+  initMultiPicker_('reportCampPicker', {
+    wrapId: 'reportCampPickerGroup',
+    label: 'Chiến dịch (tùy chọn)',
+    icon: 'fa-bullhorn',
+    allLabel: 'Tất cả chiến dịch',
+    unitLabel: 'chiến dịch',
+    searchPlaceholder: 'Tìm tên chiến dịch (Enter để chọn khớp)…',
+    emptyText: 'Chưa có chiến dịch.',
+    onApply: function(){}
+  });
+  initMultiPicker_('adsCampPicker', {
+    wrapId: 'adsCampPickerGroup',
+    label: 'Chiến dịch',
+    icon: 'fa-bullhorn',
+    allLabel: 'Tất cả chiến dịch',
+    unitLabel: 'chiến dịch',
+    searchPlaceholder: 'Tìm tên chiến dịch (Enter để chọn khớp)…',
+    emptyText: 'Chưa có chiến dịch.',
+    onApply: function(){ loadAdsData(); }
+  });
+  initMultiPicker_('adsAdSetPicker', {
+    wrapId: 'adsAdSetPickerGroup',
+    label: 'Nhóm quảng cáo',
+    icon: 'fa-layer-group',
+    allLabel: 'Tất cả nhóm QC',
+    unitLabel: 'nhóm QC',
+    searchPlaceholder: 'Tìm nhóm quảng cáo (Enter để chọn khớp)…',
+    emptyText: 'Chưa có nhóm quảng cáo.',
+    onApply: function(){ loadAdsData(); }
+  });
+  initMultiPicker_('adsNamePicker', {
+    wrapId: 'adsNamePickerGroup',
+    label: 'Mẫu quảng cáo (QC)',
+    icon: 'fa-rectangle-ad',
+    allLabel: 'Tất cả mẫu QC',
+    unitLabel: 'mẫu QC',
+    searchPlaceholder: 'Tìm tên mẫu QC (Enter để chọn khớp)…',
+    emptyText: 'Chưa có mẫu QC phù hợp.',
+    onApply: function(){ loadAdsData(); }
+  });
+}
+
+function renderMultiPickerList_(id){
+  var p = MULTI_PICKERS[id]; if(!p) return;
+  var listEl = document.getElementById(id + 'List'); if(!listEl) return;
+  if(!p.items.length){
+    listEl.innerHTML = '<div class="popover-empty">' + esc(p.emptyText) + '</div>';
+  } else {
+    listEl.innerHTML = p.items.map(function(item){
+      var isChecked = p.selected.indexOf(item.value) !== -1;
+      var hay = foldVi_(item.label + ' ' + (item.sub || ''));
+      return '<label class="account-item" data-val="'+esc(item.value)+'" data-hay="'+esc(hay)+'">' +
+        '<input type="checkbox" value="'+esc(item.value)+'" '+(isChecked?'checked':'')+' onchange="onMultiPickerCheckboxChange(\''+id+'\')">' +
+        '<div class="account-item-info">' +
+          '<span class="account-item-name">'+esc(item.label)+'</span>' +
+          (item.sub ? '<span class="account-item-id">'+esc(item.sub)+'</span>' : '') +
+        '</div>' +
+      '</label>';
+    }).join('') +
+    '<div class="popover-empty" id="'+id+'FilterEmpty" style="display:none">Không tìm thấy mục phù hợp.</div>';
+  }
+  onMultiPickerSearchInput(id, val(id + 'Search'));
+}
+
+function setMultiPickerItems(id, rawItems){
+  var p = MULTI_PICKERS[id]; if(!p) return;
+  p.items = normalizeMultiPickerItems_(rawItems);
+  var validSet = {};
+  p.items.forEach(function(it){ validSet[it.value] = true; });
+  p.selected = p.selected.filter(function(v){ return !!validSet[v]; });
+  renderMultiPickerList_(id);
+  updateMultiPickerUI_(id);
+}
+
+function setMultiPickerValues(id, values){
+  var p = MULTI_PICKERS[id]; if(!p) return;
+  var clean = (values || []).map(function(v){ return String(v || '').trim(); }).filter(Boolean);
+  var existingSet = {};
+  p.items.forEach(function(it){ existingSet[it.value] = true; });
+  clean.forEach(function(v){
+    if(!existingSet[v]){
+      p.items.push({ value: v, label: v, sub: '' });
+      existingSet[v] = true;
+    }
+  });
+  p.selected = clean.slice();
+  renderMultiPickerList_(id);
+  updateMultiPickerUI_(id);
+}
+
+function getMultiPickerValues(id){
+  var p = MULTI_PICKERS[id];
+  return p ? p.selected.slice() : [];
+}
+
+function syncMultiPickerCheckboxes_(id){
+  var p = MULTI_PICKERS[id]; if(!p) return;
+  var listEl = document.getElementById(id + 'List'); if(!listEl) return;
+  var cbs = listEl.querySelectorAll('input[type="checkbox"]');
+  cbs.forEach(function(cb){
+    cb.checked = (p.selected.indexOf(cb.value) !== -1);
+  });
+  onMultiPickerCheckboxChange(id);
+}
+
+function updateMultiPickerUI_(id){
+  var p = MULTI_PICKERS[id]; if(!p) return;
+  var wrap = document.getElementById(p.wrapId);
+  var btnText = document.getElementById(id + 'BtnText');
+  var badge = document.getElementById(id + 'Badge');
+  var selCount = p.selected.length;
+
+  if(wrap) wrap.classList.toggle('has-selection', selCount > 0);
+  if(selCount === 0){
+    if(btnText) btnText.textContent = p.allLabel;
+    if(badge) badge.style.display = 'none';
+  } else if(selCount === 1){
+    if(btnText) btnText.textContent = p.selected[0];
+    if(badge){ badge.style.display = 'inline-block'; badge.textContent = '1'; }
+  } else {
+    if(btnText) btnText.textContent = selCount + ' ' + p.unitLabel + ' đã chọn';
+    if(badge){ badge.style.display = 'inline-block'; badge.textContent = String(selCount); }
+  }
+}
+
+function closeAllMultiPickers_(){
+  Object.keys(MULTI_PICKERS).forEach(function(id){
+    var p = MULTI_PICKERS[id];
+    var wrap = document.getElementById(p.wrapId);
+    if(wrap && wrap.classList.contains('open')){
+      wrap.classList.remove('open');
+      syncMultiPickerCheckboxes_(id);
+    }
+  });
+}
+
+function toggleMultiPicker(id, e){
+  if(e) e.stopPropagation();
+  var p = MULTI_PICKERS[id]; if(!p) return;
+  var wrap = document.getElementById(p.wrapId);
+  var pop = document.getElementById(id + 'Popover');
+  var btn = document.getElementById(id + 'Btn');
+  var isCurrentlyOpen = wrap && wrap.classList.contains('open');
+  closeAllPopovers();
+  if(wrap && !isCurrentlyOpen){
+    var searchEl = document.getElementById(id + 'Search');
+    if(searchEl) searchEl.value = '';
+    syncMultiPickerCheckboxes_(id);
+    onMultiPickerSearchInput(id, '');
+    if(pop && btn){
+      pop.classList.remove('align-right');
+      var rect = btn.getBoundingClientRect();
+      if(rect.left + 360 > window.innerWidth - 16){
+        pop.classList.add('align-right');
+      }
+    }
+    wrap.classList.add('open');
+    if(searchEl){
+      setTimeout(function(){ try { searchEl.focus(); } catch(err){} }, 20);
+    }
+  }
+}
+
+function onMultiPickerSearchInput(id, rawQuery){
+  var p = MULTI_PICKERS[id]; if(!p) return;
+  var qRaw = (rawQuery || '').trim();
+  var q = foldVi_(qRaw);
+  var clearBtn = document.getElementById(id + 'SearchClear');
+  if(clearBtn) clearBtn.style.display = qRaw ? 'block' : 'none';
+
+  var listEl = document.getElementById(id + 'List');
+  if(!listEl) return;
+  var items = listEl.querySelectorAll('.account-item');
+  var visibleCount = 0;
+  items.forEach(function(item){
+    var hay = item.getAttribute('data-hay') || '';
+    var match = !q || hay.indexOf(q) !== -1;
+    item.style.display = match ? 'flex' : 'none';
+    if(match) visibleCount++;
+  });
+  var emptyEl = document.getElementById(id + 'FilterEmpty');
+  if(emptyEl){
+    emptyEl.style.display = (items.length > 0 && visibleCount === 0) ? 'block' : 'none';
+  }
+  onMultiPickerCheckboxChange(id);
+}
+
+function clearMultiPickerSearch(id){
+  var searchEl = document.getElementById(id + 'Search');
+  if(searchEl){
+    searchEl.value = '';
+    try { searchEl.focus(); } catch(err){}
+  }
+  onMultiPickerSearchInput(id, '');
+}
+
+function onMultiPickerSearchKeydown(id, e){
+  var p = MULTI_PICKERS[id]; if(!p) return;
+  if(e.key === 'Enter'){
+    e.preventDefault();
+    var qRaw = (e.target.value || '').trim();
+    var listEl = document.getElementById(id + 'List');
+    var items = listEl ? Array.from(listEl.querySelectorAll('.account-item')) : [];
+    var visibleItems = items.filter(function(it){ return it.style.display !== 'none'; });
+
+    if(visibleItems.length > 0){
+      if(qRaw){
+        items.forEach(function(it){
+          var cb = it.querySelector('input[type="checkbox"]');
+          if(cb) cb.checked = (it.style.display !== 'none');
+        });
+        onMultiPickerCheckboxChange(id);
+      }
+      applyMultiPicker(id);
+      if(qRaw){
+        showToast('Đã lọc ' + visibleItems.length + ' ' + p.unitLabel + ' khớp "' + qRaw + '"');
+      }
+    } else {
+      showToast('Không tìm thấy ' + p.unitLabel + ' phù hợp với từ khóa: "' + qRaw + '"');
+    }
+  } else if(e.key === 'Escape'){
+    closeAllPopovers();
+  }
+}
+
+function toggleMultiPickerSelectAll(id, checked){
+  var listEl = document.getElementById(id + 'List'); if(!listEl) return;
+  var searchVal = (val(id + 'Search') || '').trim();
+  var items = Array.from(listEl.querySelectorAll('.account-item'));
+  items.forEach(function(it){
+    if(searchVal && it.style.display === 'none') return;
+    var cb = it.querySelector('input[type="checkbox"]');
+    if(cb) cb.checked = !!checked;
+  });
+  onMultiPickerCheckboxChange(id);
+}
+
+function clearMultiPickerSelection(id){
+  var listEl = document.getElementById(id + 'List'); if(!listEl) return;
+  var cbs = listEl.querySelectorAll('input[type="checkbox"]');
+  cbs.forEach(function(cb){ cb.checked = false; });
+  onMultiPickerCheckboxChange(id);
+}
+
+function onMultiPickerCheckboxChange(id){
+  var p = MULTI_PICKERS[id]; if(!p) return;
+  var listEl = document.getElementById(id + 'List'); if(!listEl) return;
+  var allCbs = Array.from(listEl.querySelectorAll('input[type="checkbox"]'));
+  var totalChecked = 0;
+  allCbs.forEach(function(cb){ if(cb.checked) totalChecked++; });
+
+  var searchVal = (val(id + 'Search') || '').trim();
+  var scopeItems = Array.from(listEl.querySelectorAll('.account-item')).filter(function(it){
+    return !searchVal || it.style.display !== 'none';
+  });
+  var scopeChecked = 0;
+  scopeItems.forEach(function(it){
+    var cb = it.querySelector('input[type="checkbox"]');
+    if(cb && cb.checked) scopeChecked++;
+  });
+
+  var allCb = document.getElementById(id + 'AllCheck');
+  if(allCb){
+    allCb.checked = (scopeItems.length > 0 && scopeChecked === scopeItems.length);
+    allCb.indeterminate = (scopeChecked > 0 && scopeChecked < scopeItems.length);
+  }
+  var allLabel = document.getElementById(id + 'AllLabel');
+  if(allLabel){
+    allLabel.textContent = searchVal
+      ? ('Chọn kết quả lọc (' + scopeItems.length + ')')
+      : ('Chọn tất cả (' + allCbs.length + ')');
+  }
+  var countEl = document.getElementById(id + 'Count');
+  if(countEl){
+    countEl.textContent = totalChecked === 0
+      ? ('Mặc định: Tất cả (' + allCbs.length + ')')
+      : ('Đã chọn: ' + totalChecked + ' / ' + allCbs.length);
+  }
+}
+
+function applyMultiPicker(id){
+  var p = MULTI_PICKERS[id]; if(!p) return;
+  var listEl = document.getElementById(id + 'List');
+  var cbs = listEl ? Array.from(listEl.querySelectorAll('input[type="checkbox"]')) : [];
+  var checked = cbs.filter(function(cb){ return cb.checked; }).map(function(cb){ return cb.value; });
+
+  if(checked.length === 0 || (p.items.length > 1 && checked.length >= p.items.length)){
+    p.selected = [];
+  } else {
+    p.selected = checked;
+  }
+  updateMultiPickerUI_(id);
+  var wrap = document.getElementById(p.wrapId);
+  if(wrap) wrap.classList.remove('open');
+  if(typeof p.onApply === 'function'){
+    p.onApply(p.selected.slice());
+  }
+}
+
 function readFilters(){
   var accs = getSelectedAccountIds();
+  var campNames = getMultiPickerValues('campPicker');
   return {
     accountIds: accs,
     accountId: accs.length === 1 ? accs[0] : (accs.indexOf('ALL') !== -1 ? 'ALL' : (accs[0] || 'ALL')),
-    search: val('filterSearch'),
+    campaignNames: campNames,
+    search: '',
     dateFrom: currentRange.from || val('headerDateFrom') || val('filterDateFrom'),
     dateTo: currentRange.to || val('headerDateTo') || val('filterDateTo'),
     roasMin: val('filterRoasMin'),
@@ -8145,37 +8629,6 @@ function readFilters(){
 }
 
 function val(id){ var el=document.getElementById(id); return el?el.value:''; }
-
-var campSearchTimer_ = null;
-function onCampSearchInput(val){
-  var clearBtn = document.getElementById('filterSearchClearBtn');
-  if(clearBtn) clearBtn.style.display = (val && val.trim()) ? 'block' : 'none';
-  clearTimeout(campSearchTimer_);
-  campSearchTimer_ = setTimeout(function(){
-    applyCampaignsTabFilters();
-  }, 350);
-}
-
-function clearCampSearch(){
-  var el = document.getElementById('filterSearch');
-  if(el){ el.value = ''; }
-  var clearBtn = document.getElementById('filterSearchClearBtn');
-  if(clearBtn) clearBtn.style.display = 'none';
-  clearTimeout(campSearchTimer_);
-  applyCampaignsTabFilters();
-}
-
-function onCampSearchKeydown(e){
-  if(e.key === 'Enter'){
-    e.preventDefault();
-    clearTimeout(campSearchTimer_);
-    applyCampaignsTabFilters();
-    var q = (e.target.value || '').trim();
-    if(q) showToast('Đang lọc theo từ khóa: "' + q + '"');
-  } else if(e.key === 'Escape'){
-    clearCampSearch();
-  }
-}
 
 function applyCampaignsTabFilters(){
   if(activeTab === 'campaigns' && campaignsSubLevel === 'adset'){
@@ -8186,9 +8639,7 @@ function applyCampaignsTabFilters(){
 }
 
 function resetCampaignsTabFilters(){
-  ['filterSearch','filterRoasMin'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
-  var clearBtn = document.getElementById('filterSearchClearBtn');
-  if(clearBtn) clearBtn.style.display = 'none';
+  var roasEl = document.getElementById('filterRoasMin'); if(roasEl) roasEl.value='';
   var objEl = document.getElementById('filterObjective'); if(objEl) objEl.value='';
   activePill=null; updatePillUI();
   tableQuickFilter = 'all';
@@ -8197,27 +8648,15 @@ function resetCampaignsTabFilters(){
   });
   if(activeTab === 'campaigns' && campaignsSubLevel === 'adset'){
     adsetCampaign = '';
-    var sel = document.getElementById('adsetCampaign'); if(sel) sel.value = '';
+    setMultiPickerValues('adsetCampPicker', []);
+    setMultiPickerValues('adsetNamePicker', []);
     var chk = document.getElementById('adsetActiveOnly'); if(chk) chk.checked = false;
     updateCampaignDrilldownUI_();
     populateAdSetCampaigns();
     loadAdSetData();
   } else {
+    setMultiPickerValues('campPicker', []);
     loadData(readFilters());
-  }
-}
-
-function onAdsSearchKeydown(e){
-  if(e.key === 'Enter'){
-    e.preventDefault();
-    clearTimeout(adsLoadTimer_);
-    loadAdsData();
-    var q = (e.target.value || '').trim();
-    if(q) showToast('Đang lọc mẫu QC theo: "' + q + '"');
-  } else if(e.key === 'Escape'){
-    e.target.value = '';
-    clearTimeout(adsLoadTimer_);
-    loadAdsData();
   }
 }
 
@@ -8241,13 +8680,7 @@ function populateObjectives(){
 }
 
 function populateCampaignSuggestions(names){
-  var dl = document.getElementById('campaignSuggestions'); if(!dl) return;
-  var set = {};
-  var unique = [];
-  (names || []).forEach(function(n){
-    if(n && !set[n]){ set[n]=true; unique.push(n); }
-  });
-  dl.innerHTML = unique.map(function(n){ return '<option value="'+esc(n)+'">'; }).join('');
+  setMultiPickerItems('campPicker', names || []);
 }
 
 function setPill(kind){
@@ -8373,25 +8806,31 @@ function updateCampaignDrilldownUI_(){
   });
 
   var campGrp = document.getElementById('adsetCampaignFilterGroup');
+  var campPickerGrp = document.getElementById('campPickerGroup');
+  var adsetNameGrp = document.getElementById('adsetNamePickerGroup');
   var extraRow = document.getElementById('adsetExtraFilterRow');
   var chip = document.getElementById('adsetActiveCampChip');
   var chipName = document.getElementById('adsetActiveCampName');
   var fTitle = document.getElementById('campaignsFilterTitle');
   var fHint = document.getElementById('campaignsFilterHint');
-  var sLabel = document.getElementById('filterSearchLabel');
-  var sInput = document.getElementById('filterSearch');
   var awb = document.getElementById('adsetWidgetsBar');
   var titleEl = document.getElementById('campaignTableTitle');
   var subEl = document.getElementById('campaignTableSubtitle');
   var kpiTitleEl = document.getElementById('campaignsKpiTitle');
 
+  var selAdSetCamps = getMultiPickerValues('adsetCampPicker');
+  var hasAdSetCamp = selAdSetCamps.length > 0;
+  var campSummary = selAdSetCamps.length === 1 ? selAdSetCamps[0] : (selAdSetCamps.length > 1 ? (selAdSetCamps.length + ' chiến dịch đã chọn') : '');
+
   if (campGrp) campGrp.style.display = isAdset ? 'flex' : 'none';
+  if (campPickerGrp) campPickerGrp.style.display = isAdset ? 'none' : 'flex';
+  if (adsetNameGrp) adsetNameGrp.style.display = isAdset ? 'flex' : 'none';
   if (extraRow) extraRow.style.display = isAdset ? 'flex' : 'none';
-  if (awb) awb.style.display = (isAdset && adsetCampaign) ? 'flex' : 'none';
+  if (awb) awb.style.display = (isAdset && hasAdSetCamp) ? 'flex' : 'none';
 
   if (chip) {
-    chip.style.display = (isAdset && adsetCampaign) ? 'inline-flex' : 'none';
-    if (chipName) chipName.textContent = adsetCampaign || '';
+    chip.style.display = (isAdset && hasAdSetCamp) ? 'inline-flex' : 'none';
+    if (chipName) chipName.textContent = campSummary;
   }
 
   if (!isAdset) {
@@ -8399,18 +8838,14 @@ function updateCampaignDrilldownUI_(){
     var agw = document.getElementById('agegenderWidgetCard'); if (agw) agw.style.display = 'none';
     if (fTitle) fTitle.textContent = 'Bộ Lọc Chiến Dịch';
     if (fHint) fHint.innerHTML = '&mdash; bấm &ldquo;Nhóm QC &rarr;&rdquo; hoặc &ldquo;Mẫu QC &rarr;&rdquo; trên từng dòng để đào sâu';
-    if (sLabel) sLabel.innerHTML = '<i class="fas fa-search" aria-hidden="true"></i> Tìm tên chiến dịch';
-    if (sInput) sInput.placeholder = 'Gõ tên chiến dịch (Enter để lọc)…';
     if (kpiTitleEl) kpiTitleEl.textContent = 'Tóm Tắt Chỉ Số Chiến Dịch (Theo Bộ Lọc)';
     if (titleEl) titleEl.innerHTML = '<i class="fas fa-table-list" aria-hidden="true"></i> Hiệu Suất Chiến Dịch';
     if (subEl) subEl.textContent = 'Micro Data Bars cho Chi tiêu/Doanh số · Heatmap Shading cho ROAS/CPA/CTR · Bấm "Nhóm QC →" để đào sâu';
   } else {
     if (fTitle) fTitle.textContent = 'Bộ Lọc Nhóm Quảng Cáo (Ad Sets)';
-    if (fHint) fHint.innerHTML = '&mdash; xem tất cả Nhóm QC hoặc lọc theo Chiến dịch cha, tên Nhóm QC, ROAS';
-    if (sLabel) sLabel.innerHTML = '<i class="fas fa-search" aria-hidden="true"></i> Tìm tên nhóm QC';
-    if (sInput) sInput.placeholder = 'Gõ tên nhóm QC (Enter để lọc)…';
+    if (fHint) fHint.innerHTML = '&mdash; xem tất cả Nhóm QC hoặc chọn Chiến dịch cha, Nhóm QC, ROAS';
     if (kpiTitleEl) kpiTitleEl.textContent = 'Tóm Tắt Chỉ Số Nhóm QC (Theo Bộ Lọc)';
-    if (titleEl) titleEl.innerHTML = '<i class="fas fa-layer-group" aria-hidden="true"></i> Hiệu Suất Nhóm Quảng Cáo (Ad Sets)' + (adsetCampaign ? ' &mdash; ' + esc(adsetCampaign) : '');
+    if (titleEl) titleEl.innerHTML = '<i class="fas fa-layer-group" aria-hidden="true"></i> Hiệu Suất Nhóm Quảng Cáo (Ad Sets)' + (campSummary ? ' &mdash; ' + esc(campSummary) : '');
     if (subEl) subEl.textContent = 'So sánh hiệu suất Nhóm QC · Bấm "Mẫu QC →" để xem creative của nhóm đó';
   }
 }
@@ -8431,8 +8866,7 @@ function setCampaignsSubLevel(sub){
 
 function clearAdSetCampaignFilter(){
   adsetCampaign = '';
-  var sel = document.getElementById('adsetCampaign');
-  if (sel) sel.value = '';
+  setMultiPickerValues('adsetCampPicker', []);
   updateCampaignDrilldownUI_();
   loadAdSetData();
 }
@@ -8442,17 +8876,13 @@ function drillDownToAdSets(campaignName){
   adsetCampaign = campaignName;
   campaignsSubLevel = 'adset';
   activeLevel = 'adset';
-  var searchEl = document.getElementById('filterSearch');
-  if (searchEl) searchEl.value = '';
-  var clearBtn = document.getElementById('filterSearchClearBtn');
-  if (clearBtn) clearBtn.style.display = 'none';
+  setMultiPickerValues('adsetCampPicker', [campaignName]);
+  setMultiPickerValues('adsetNamePicker', []);
   if (activeTab !== 'campaigns') {
     switchTab('campaigns');
   } else {
     updateCampaignDrilldownUI_();
     populateAdSetCampaigns();
-    var sel = document.getElementById('adsetCampaign');
-    if (sel) sel.value = campaignName;
     loadAdSetData();
   }
   window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -8463,24 +8893,9 @@ function exitAdSetDrilldown(){
 }
 
 function drillDownToAds(campaignName, adSetName){
-  var cSel = document.getElementById('adsCampaign');
-  var aSel = document.getElementById('adsAdSet');
-  if (cSel) {
-    if (campaignName && !Array.from(cSel.options).some(function(o){ return o.value === campaignName; })) {
-      var opt = document.createElement('option');
-      opt.value = campaignName; opt.textContent = campaignName;
-      cSel.appendChild(opt);
-    }
-    cSel.value = campaignName || '';
-  }
-  if (aSel) {
-    if (adSetName && !Array.from(aSel.options).some(function(o){ return o.value === adSetName; })) {
-      var opt2 = document.createElement('option');
-      opt2.value = adSetName; opt2.textContent = adSetName;
-      aSel.appendChild(opt2);
-    }
-    aSel.value = adSetName || '';
-  }
+  setMultiPickerValues('adsCampPicker', campaignName ? [campaignName] : []);
+  setMultiPickerValues('adsAdSetPicker', adSetName ? [adSetName] : []);
+  setMultiPickerValues('adsNamePicker', []);
   switchTab('ads');
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -8540,8 +8955,9 @@ function toggleWidget(id, on){
   applyWidgetVisibility_();
 }
 function applyWidgetVisibility_(){
-  var showP = activeLevel==='adset' && adsetCampaign && visibleWidgets.indexOf('placement')!==-1;
-  var showA = activeLevel==='adset' && adsetCampaign && visibleWidgets.indexOf('agegender')!==-1;
+  var hasCamp = getMultiPickerValues('adsetCampPicker').length > 0 || !!adsetCampaign;
+  var showP = activeLevel==='adset' && hasCamp && visibleWidgets.indexOf('placement')!==-1;
+  var showA = activeLevel==='adset' && hasCamp && visibleWidgets.indexOf('agegender')!==-1;
   var pw = document.getElementById('placementWidgetCard');
   if(pw) pw.style.display = showP ? 'block' : 'none';
   var agw = document.getElementById('agegenderWidgetCard');
@@ -8549,7 +8965,9 @@ function applyWidgetVisibility_(){
 }
 function loadAdSetWidgets(){
   applyWidgetVisibility_();
-  if(!adsetCampaign || !isAuthenticated_()) return;
+  var camps = getMultiPickerValues('adsetCampPicker');
+  var hasCamp = camps.length > 0 || !!adsetCampaign;
+  if(!hasCamp || !isAuthenticated_()) return;
   var filters = adsetFilters();
   var token = getSessionToken_();
   if(visibleWidgets.indexOf('placement')!==-1){
@@ -8631,12 +9049,16 @@ function DEMO_ADSET_AGEGENDER(){
 
 function adsetFilters(){
   var accs = getSelectedAccountIds();
+  var campNames = getMultiPickerValues('adsetCampPicker');
+  var adSetNames = getMultiPickerValues('adsetNamePicker');
   return {
     accountIds: accs,
     accountId: accs.length === 1 ? accs[0] : (accs.indexOf('ALL') !== -1 ? 'ALL' : (accs[0] || 'ALL')),
     dateFrom: currentRange.from || val('headerDateFrom') || val('adsetDateFrom'),
     dateTo: currentRange.to || val('headerDateTo') || val('adsetDateTo'),
-    search: val('filterSearch'),
+    campaignNames: campNames,
+    adSetNames: adSetNames,
+    search: '',
     roasMin: val('filterRoasMin'),
     objective: val('filterObjective')
   };
@@ -8654,15 +9076,11 @@ function isAccountAllowedInDemo_(accId, targetAccounts) {
 }
 
 function populateAdSetCampaigns(){
-  var sel = document.getElementById('adsetCampaign'); if(!sel) return;
   if(!isAuthenticated_()) return;
   function fill(list, total){
-    var cur = adsetCampaign || sel.value;
-    sel.innerHTML = ['<option value="">Tất cả chiến dịch (' + (list||[]).length + ')</option>'].concat((list||[]).map(function(n){
-      return '<option value="'+esc(n)+'">'+esc(n)+'</option>';
-    })).join('');
-    sel.value = (cur && (list||[]).indexOf(cur)!==-1) ? cur : '';
-    adsetCampaign = sel.value;
+    setMultiPickerItems('adsetCampPicker', list || []);
+    var vals = getMultiPickerValues('adsetCampPicker');
+    adsetCampaign = (vals.length === 1) ? vals[0] : '';
     var hint = document.getElementById('adsetActiveOnlyHint');
     if(hint) hint.textContent = (typeof total==='number') ? '('+(list||[]).length+' / '+total+')' : '';
     updateCampaignDrilldownUI_();
@@ -8670,23 +9088,13 @@ function populateAdSetCampaigns(){
   var activeOnlyEl = document.getElementById('adsetActiveOnly');
   var filters = adsetFilters(); filters.activeOnly = !!(activeOnlyEl && activeOnlyEl.checked);
   if(isDemo()){
-    var demoRes = DEMO_ADSET('', filters);
-    var demoNames = [];
-    (demoRes.campaigns || []).forEach(function(c){
-      if(c.realCampaignName && demoNames.indexOf(c.realCampaignName) === -1) demoNames.push(c.realCampaignName);
-    });
-    fill(demoNames, demoNames.length);
+    var demoRes = DEMO_ADSET('', { accountIds: filters.accountIds, dateFrom: filters.dateFrom, dateTo: filters.dateTo });
+    fill(demoRes.campaignList || [], (demoRes.campaignList || []).length);
     return;
   }
   gasRun_('getAdSetCampaigns', [filters, getSessionToken_()], function(r){
     fill(r && r.campaigns ? r.campaigns : [], r && r.totalCampaigns);
   }, function(){ fill([]); });
-}
-
-function selectAdSetCampaign(v){
-  adsetCampaign = v || '';
-  updateCampaignDrilldownUI_();
-  loadAdSetData();
 }
 
 function loadAdSetData(){
@@ -8713,6 +9121,11 @@ function onAdSetData(res){
   }
   ADSET = res; if(!ADSET.summary) ADSET.summary = emptySummaryClient();
   STATE = ADSET;
+  if(res.adsetList){
+    setMultiPickerItems('adsetNamePicker', res.adsetList);
+  } else {
+    setMultiPickerItems('adsetNamePicker', (res.campaigns || []).map(function(c){ return { name: c.campaignName, campaignName: c.realCampaignName || '' }; }));
+  }
   var bz = document.getElementById('bannerZone');
   if(bz) {
     if(res.error) bz.innerHTML = banner('error','circle-exclamation','<b>Nhóm QC:</b> '+esc(res.error));
@@ -8737,9 +9150,33 @@ function DEMO_ADSET(campaign, filters){
     { accId:'act_542081774682636',  accName:'Alpha 7 (Phương)', camp:'[Phương] Đẩy Hàng Tồn - Giá Sốc',   name:'Nam 22-35 Toàn Quốc',           obj:'OUTCOME_SALES',      spent:5800000,  results:28,  reach:31000, purchases:28,  purchaseValue:13200000, impressions:145000, ctrAll:2.0, cpm:40000, cpc:2500, quality:qs(2,2,2), audienceType:'Broad', learningPhaseStatus:'Đang chạy' }
   ];
 
-  var filtered = allTemplates.filter(function(a){
-    if(!isAccountAllowedInDemo_(a.accId, targetAccounts)) return false;
-    if(campaign && a.camp !== campaign) return false;
+  var scopedByAccount = allTemplates.filter(function(a){
+    return isAccountAllowedInDemo_(a.accId, targetAccounts);
+  });
+  var campListSet = {};
+  scopedByAccount.forEach(function(a){ if(a.camp) campListSet[a.camp] = true; });
+  var campaignList = Object.keys(campListSet).sort();
+
+  var targetCampaigns = (Array.isArray(filters.campaignNames) && filters.campaignNames.length)
+    ? filters.campaignNames
+    : (campaign ? [campaign] : []);
+
+  var scopedByCamp = scopedByAccount.filter(function(a){
+    if(targetCampaigns.length && targetCampaigns.indexOf(a.camp) === -1) return false;
+    return true;
+  });
+
+  var adsetMetaMap = {};
+  scopedByCamp.forEach(function(a){
+    if(a.name && !adsetMetaMap[a.name]) adsetMetaMap[a.name] = a.camp || '';
+  });
+  var adsetList = Object.keys(adsetMetaMap).sort().map(function(name){
+    return { name: name, campaignName: adsetMetaMap[name] };
+  });
+
+  var targetAdSets = Array.isArray(filters.adSetNames) ? filters.adSetNames.filter(Boolean) : [];
+  var filtered = scopedByCamp.filter(function(a){
+    if(targetAdSets.length && targetAdSets.indexOf(a.name) === -1) return false;
     if(filters.objective && a.obj !== filters.objective) return false;
     if(filters.search){
       var q = String(filters.search).toLowerCase().trim();
@@ -8821,7 +9258,7 @@ function DEMO_ADSET(campaign, filters){
   s.cpc = s.totalClicks > 0 ? (s.totalSpent / s.totalClicks) : 0;
   s.accountQuality = { score10: 7.8, dims:{q:2.5,e:2.4,c:2.3} };
 
-  return { rows:rows, campaigns:camps, campaignList:allTemplates.map(function(t){return t.camp;}), summary:s, error:null };
+  return { rows:rows, campaigns:camps, campaignList:campaignList, adsetList:adsetList, summary:s, error:null };
 }
 
 /* ==========================================================================
@@ -8830,15 +9267,21 @@ function DEMO_ADSET(campaign, filters){
 
 function adsFilters(){
   var accs = getSelectedAccountIds();
+  var campNames = getMultiPickerValues('adsCampPicker');
+  var adSetNames = getMultiPickerValues('adsAdSetPicker');
+  var adNames = getMultiPickerValues('adsNamePicker');
   return {
     accountIds: accs,
     accountId: accs.length === 1 ? accs[0] : (accs.indexOf('ALL') !== -1 ? 'ALL' : (accs[0] || 'ALL')),
     dateFrom: currentRange.from || val('headerDateFrom') || val('adsDateFrom'),
     dateTo: currentRange.to || val('headerDateTo') || val('adsDateTo'),
-    campaignName: val('adsCampaign'),
-    adSetName: val('adsAdSet'),
+    campaignNames: campNames,
+    campaignName: campNames.length === 1 ? campNames[0] : '',
+    adSetNames: adSetNames,
+    adSetName: adSetNames.length === 1 ? adSetNames[0] : '',
+    adNames: adNames,
     creativeType: val('adsCreativeType'),
-    search: val('adsSearch'),
+    search: '',
     activeOnly: !!document.getElementById('adsActiveOnly').checked,
     winnersOnly: !!document.getElementById('adsWinnersOnly').checked,
     sort: val('adsSort') || 'roas'
@@ -8846,24 +9289,16 @@ function adsFilters(){
 }
 
 function resetAdsFilters(){
-  ['adsDateFrom','adsDateTo','adsCampaign','adsAdSet','adsCreativeType','adsSearch'].forEach(function(id){
+  ['adsDateFrom','adsDateTo','adsCreativeType'].forEach(function(id){
     var el = document.getElementById(id); if(el) el.value = '';
   });
+  setMultiPickerValues('adsCampPicker', []);
+  setMultiPickerValues('adsAdSetPicker', []);
+  setMultiPickerValues('adsNamePicker', []);
   var chk1 = document.getElementById('adsActiveOnly'); if(chk1) chk1.checked = false;
   var chk2 = document.getElementById('adsWinnersOnly'); if(chk2) chk2.checked = false;
   var srt = document.getElementById('adsSort'); if(srt) srt.value = 'roas';
   loadAdsData();
-}
-
-function onAdsCampaignChange(){
-  var adSetEl = document.getElementById('adsAdSet');
-  if(adSetEl) adSetEl.value = '';
-  loadAdsData();
-}
-
-function debouncedLoadAds_(){
-  clearTimeout(adsLoadTimer_);
-  adsLoadTimer_ = setTimeout(loadAdsData, 350);
 }
 
 function loadAdsData(){
@@ -8875,20 +9310,27 @@ function loadAdsData(){
   gasRun_('getAdData', [filters, getSessionToken_()], function(res){
     if(reqId === adsReqSeq_) onAdsData(res);
   }, function(e){
-    if(reqId === adsReqSeq_) onAdsData({ ads:[], campaignList:[], adsetList:[], summary:emptySummaryClient(), error:(e&&e.message)||String(e) });
+    if(reqId === adsReqSeq_) onAdsData({ ads:[], campaignList:[], adsetList:[], adsetMeta:[], adNameList:[], summary:emptySummaryClient(), error:(e&&e.message)||String(e) });
   });
 }
 
 function onAdsData(res){
   hideFilterStatus_('adsFilterStatus', res && res.error ? 'Lỗi' : 'Đã cập nhật');
-  if(!res){ res = { ads:[], campaignList:[], adsetList:[], summary:emptySummaryClient(), error:'Không nhận được phản hồi từ server.' }; }
+  if(!res){ res = { ads:[], campaignList:[], adsetList:[], adsetMeta:[], adNameList:[], summary:emptySummaryClient(), error:'Không nhận được phản hồi từ server.' }; }
   if(res.accounts){
     syncAccountsFromServer_(res.accounts, null);
   }
   ADS = res; if(!ADS.summary) ADS.summary = emptySummaryClient();
 
-  fillSelectPreserve_('adsCampaign', res.campaignList||[], 'Tất cả chiến dịch');
-  fillSelectPreserve_('adsAdSet', res.adsetList||[], 'Tất cả nhóm quảng cáo');
+  setMultiPickerItems('adsCampPicker', res.campaignList || []);
+  setMultiPickerItems('adsAdSetPicker', (res.adsetMeta && res.adsetMeta.length) ? res.adsetMeta : (res.adsetList || []));
+  if(res.adNameList){
+    setMultiPickerItems('adsNamePicker', res.adNameList);
+  } else {
+    setMultiPickerItems('adsNamePicker', (res.ads || []).map(function(a){
+      return { name: a.adName, adSetName: a.adSetName || '', campaignName: a.realCampaignName || '' };
+    }));
+  }
 
   var lastUp = document.getElementById('lastUpdated');
   if(lastUp) lastUp.textContent = res.generatedAt || new Date().toLocaleString();
@@ -8903,15 +9345,6 @@ function onAdsData(res){
     renderAdsGrid(res.ads||[]);
   }
   updateAdsViewModeUI();
-}
-
-function fillSelectPreserve_(id, list, allLabel){
-  var sel = document.getElementById(id); if(!sel) return;
-  var cur = sel.value;
-  sel.innerHTML = ['<option value="">'+esc(allLabel)+'</option>'].concat((list||[]).map(function(n){
-    return '<option value="'+esc(n)+'">'+esc(n)+'</option>';
-  })).join('');
-  sel.value = (cur && (list||[]).indexOf(cur)!==-1) ? cur : '';
 }
 
 /* ==========================================================================
@@ -8987,7 +9420,7 @@ function onData(res){
   var lastUp = document.getElementById('lastUpdated');
   if(lastUp) lastUp.textContent = CAMP.generatedAt || new Date().toLocaleString();
 
-  populateCampaignSuggestions(res.allCampaignNames || distinctNamesFromRows_(res.rows));
+  populateCampaignSuggestions((res.allCampaignMeta && res.allCampaignMeta.length) ? res.allCampaignMeta : (res.allCampaignNames || distinctNamesFromRows_(res.rows)));
 
   if(activeLevel === 'campaign'){
     STATE = CAMP;
@@ -9211,9 +9644,19 @@ function DEMO_DATA(filters){
   ];
 
   var targetAccounts = filters.accountIds || selectedAccountIds;
-  var activeTemplates = rawCampaignTemplates.filter(function(t){
+  var accountTemplates = rawCampaignTemplates.filter(function(t){
     return isAccountAllowedInDemo_(t.accId, targetAccounts);
   });
+  var allCampaignNamesDemo = accountTemplates.map(function(t){ return t.camp; });
+  var allCampaignMetaDemo = accountTemplates.map(function(t){ return { name: t.camp, accountName: t.accName }; });
+
+  var activeTemplates = accountTemplates.slice();
+  var targetCampNames = Array.isArray(filters.campaignNames) ? filters.campaignNames.filter(Boolean) : [];
+  if(targetCampNames.length){
+    activeTemplates = activeTemplates.filter(function(t){
+      return targetCampNames.indexOf(t.camp) !== -1;
+    });
+  }
 
   // Lọc theo search (Tên chiến dịch, Tên tài khoản QC, ID tài khoản, Mục tiêu)
   if(filters.search){
@@ -9358,7 +9801,8 @@ function DEMO_DATA(filters){
     rows: rows,
     campaigns: camps,
     summary: s,
-    allCampaignNames: camps.map(function(c){ return c.campaignName; }),
+    allCampaignNames: allCampaignNamesDemo,
+    allCampaignMeta: allCampaignMetaDemo,
     generatedAt: new Date().toLocaleString('vi-VN'),
     error: null
   };
@@ -9492,16 +9936,47 @@ function DEMO_ADS(filters){
   var targetAccounts = filters.accountIds || selectedAccountIds;
   ads = ads.filter(function(a){ return isAccountAllowedInDemo_(a.accId, targetAccounts); });
 
+  var targetCampaigns = (Array.isArray(filters.campaignNames) && filters.campaignNames.length)
+    ? filters.campaignNames.filter(Boolean)
+    : (filters.campaignName ? [filters.campaignName] : []);
+  var targetAdSets = (Array.isArray(filters.adSetNames) && filters.adSetNames.length)
+    ? filters.adSetNames.filter(Boolean)
+    : (filters.adSetName ? [filters.adSetName] : []);
+  var targetAdNames = Array.isArray(filters.adNames) ? filters.adNames.filter(Boolean) : [];
+
   var scopedCampaigns = [];
   var scopedAdSets = [];
+  var adsetMetaMap = {};
   ads.forEach(function(a){
     if(a.realCampaignName && scopedCampaigns.indexOf(a.realCampaignName) === -1) scopedCampaigns.push(a.realCampaignName);
-    if((!filters.campaignName || a.realCampaignName === filters.campaignName) && a.adSetName && scopedAdSets.indexOf(a.adSetName) === -1){
-      scopedAdSets.push(a.adSetName);
+    if((!targetCampaigns.length || targetCampaigns.indexOf(a.realCampaignName) !== -1) && a.adSetName){
+      if(scopedAdSets.indexOf(a.adSetName) === -1) scopedAdSets.push(a.adSetName);
+      if(!adsetMetaMap[a.adSetName]) adsetMetaMap[a.adSetName] = a.realCampaignName || '';
     }
   });
+  var adsetMeta = scopedAdSets.slice().sort().map(function(name){
+    return { name: name, campaignName: adsetMetaMap[name] || '' };
+  });
+
+  if(targetCampaigns.length){
+    ads = ads.filter(function(a){ return targetCampaigns.indexOf(a.realCampaignName) !== -1; });
+  }
+  if(targetAdSets.length){
+    ads = ads.filter(function(a){ return targetAdSets.indexOf(a.adSetName) !== -1; });
+  }
+
+  var adNameMetaMap = {};
+  ads.forEach(function(a){
+    if(a.adName && !adNameMetaMap[a.adName]){
+      adNameMetaMap[a.adName] = { name: a.adName, adSetName: a.adSetName || '', campaignName: a.realCampaignName || '' };
+    }
+  });
+  var adNameList = Object.keys(adNameMetaMap).sort().map(function(k){ return adNameMetaMap[k]; });
 
   // Áp dụng filters cho DEMO_ADS
+  if(targetAdNames.length){
+    ads = ads.filter(function(a){ return targetAdNames.indexOf(a.adName) !== -1; });
+  }
   if(filters.search){
     var needle = String(filters.search).toLowerCase().trim();
     ads = ads.filter(function(a){
@@ -9511,12 +9986,6 @@ function DEMO_ADS(filters){
       var matchType = a.creativeType && a.creativeType.toLowerCase().indexOf(needle) !== -1;
       return matchName || matchCamp || matchAdSet || matchType;
     });
-  }
-  if(filters.campaignName){
-    ads = ads.filter(function(a){ return a.realCampaignName === filters.campaignName; });
-  }
-  if(filters.adSetName){
-    ads = ads.filter(function(a){ return a.adSetName === filters.adSetName; });
   }
   if(filters.creativeType){
     ads = ads.filter(function(a){ return a.creativeType === filters.creativeType; });
@@ -9542,6 +10011,8 @@ function DEMO_ADS(filters){
     ads: ads,
     campaignList: scopedCampaigns,
     adsetList: scopedAdSets,
+    adsetMeta: adsetMeta,
+    adNameList: adNameList,
     summary: s,
     generatedAt: new Date().toLocaleString('vi-VN'),
     error: null
@@ -9611,7 +10082,7 @@ function resetReportBuilder(){
   reportBreakdownSel = ['age','gender'];
   reportMetricSel = ['roas'];
   ['reportDateFrom','reportDateTo','reportRegionFilter'].forEach(function(id){ var el = document.getElementById(id); if(el) el.value=''; });
-  var rc = document.getElementById('reportCampaign'); if(rc) rc.value='';
+  setMultiPickerValues('reportCampPicker', []);
   buildReportPickers();
   var bz = document.getElementById('reportBannerZone'); if(bz) bz.innerHTML='';
   var cw = document.getElementById('reportChartWrap'); if(cw) cw.style.display='none';
@@ -9621,13 +10092,15 @@ function resetReportBuilder(){
 }
 
 function readReportConfig(){
+  var campNames = getMultiPickerValues('reportCampPicker');
   return {
     accountIds: getSelectedAccountIds(),
     breakdowns: reportBreakdownSel.slice(),
     dateFrom: val('reportDateFrom'),
     dateTo: val('reportDateTo'),
     region: val('reportRegionFilter'),
-    campaignName: val('reportCampaign'),
+    campaignNames: campNames,
+    campaignName: campNames.length === 1 ? campNames[0] : '',
     metrics: reportMetricSel.slice()
   };
 }
@@ -9643,10 +10116,11 @@ var BREAKDOWN_TITLES_ = {
 };
 
 function populateReportCampaigns_(){
-  var sel = document.getElementById('reportCampaign');
-  if(!sel || !CAMP) return;
-  var names = CAMP.allCampaignNames || distinctNamesFromRows_(CAMP.rows);
-  fillSelectPreserve_('reportCampaign', names, 'Tất cả chiến dịch');
+  if(!CAMP) return;
+  var items = (CAMP.allCampaignMeta && CAMP.allCampaignMeta.length)
+    ? CAMP.allCampaignMeta
+    : (CAMP.allCampaignNames || distinctNamesFromRows_(CAMP.rows));
+  setMultiPickerItems('reportCampPicker', items);
 }
 
 function selectBreakdownDim(dim){
@@ -9997,7 +10471,7 @@ function onArchiveFileChosen(input){
   reader.onload = function(e){
     ARCHIVE[activeLevel] = { mode:true, csv:e.target.result, fileName:file.name };
     updateArchiveBarUI();
-    if(activeLevel==='adset'){ adsetCampaign=''; populateAdSetCampaigns(); loadAdSetData(); }
+    if(activeLevel==='adset'){ adsetCampaign=''; setMultiPickerValues('adsetCampPicker', []); setMultiPickerValues('adsetNamePicker', []); populateAdSetCampaigns(); loadAdSetData(); }
     else { loadData(readFilters()); }
   };
   reader.onerror = function(){ showToast('Không thể đọc file CSV.'); };
@@ -10007,7 +10481,7 @@ function onArchiveFileChosen(input){
 function clearArchiveView(){
   ARCHIVE[activeLevel] = { mode:false, csv:null, fileName:'' };
   updateArchiveBarUI();
-  if(activeLevel==='adset'){ adsetCampaign=''; populateAdSetCampaigns(); loadAdSetData(); }
+  if(activeLevel==='adset'){ adsetCampaign=''; setMultiPickerValues('adsetCampPicker', []); setMultiPickerValues('adsetNamePicker', []); populateAdSetCampaigns(); loadAdSetData(); }
   else { loadData(readFilters()); }
 }
 
@@ -11210,6 +11684,7 @@ function ensureModernDashboardUI() {
 document.addEventListener('DOMContentLoaded', function(){
   ensureModernDashboardUI();
   initHeaderDatePicker();
+  initAllMultiPickers_();
 
   document.addEventListener('click', function(e){
     if(e.target && e.target.isConnected === false) return;
@@ -11217,6 +11692,9 @@ document.addEventListener('DOMContentLoaded', function(){
     if(accWrap && accWrap.classList.contains('open') && !accWrap.contains(e.target)){
       accWrap.classList.remove('open');
       syncAccountCheckboxesFromState_();
+    }
+    if(!e.target || !e.target.closest || !e.target.closest('.filter-picker-wrap')){
+      closeAllMultiPickers_();
     }
     var dateWrap = document.getElementById('headerDatePickerWrap');
     if(dateWrap && dateWrap.classList.contains('open') && !dateWrap.contains(e.target)){
