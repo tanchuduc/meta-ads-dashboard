@@ -4,8 +4,11 @@
   "private": true,
   "scripts": {
     "push": "npx @google/clasp push --force",
+    "deploy": "npx @google/clasp deploy -i AKfycbwiUrrO-wOlSQ8V-_6curECLrd7-n339lcJLhAwK6AUfQwzvxWeDgNYj4Xaq765-9uZ",
+    "sync": "npx @google/clasp push --force && npx @google/clasp deploy -i AKfycbwiUrrO-wOlSQ8V-_6curECLrd7-n339lcJLhAwK6AUfQwzvxWeDgNYj4Xaq765-9uZ",
     "pull": "npx @google/clasp pull",
     "status": "npx @google/clasp status",
+    "deployments": "npx @google/clasp deployments",
     "login": "npx @google/clasp login"
   }
 }
