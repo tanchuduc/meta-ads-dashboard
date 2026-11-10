@@ -634,32 +634,41 @@ function getExistingAdCreativeIds_() {
   return ids;
 }
 
-// One GET /?ids=<a>,<b>,...&fields=... call per 50-ID chunk (AD_CREATIVES_FASTPATH_CHUNK_SIZE_).
-// Multi-ID batch fetch, NOT the separate POST /batch endpoint — a single request, response
-// keyed by ad_id. fetchWithRetry_'s default 2nd arg (5 retries) is unnecessary weight for a
-// "nice to have, always has a fallback" call (same reasoning as the 2-retry calls elsewhere
-// in this file, e.g. getVideoNativePictureMap_) — thumbnails/full sync are one
-// importAdCreatives() run away regardless, so this uses 2 retries, not the default 5.
+// Replaced GET /?ids= (deprecated in Meta Graph API v26.0+) with parallel UrlFetchApp.fetchAll.
+// Each request queries node endpoint /{ad_id}?fields=... directly, which is fully supported
+// across all Graph API versions and avoids the "The ids query parameter is deprecated in v26.0+" error.
 function fetchAdsFastPathBatch_(adIds) {
   var out = [];
-  for (var i = 0; i < adIds.length; i += AD_CREATIVES_FASTPATH_CHUNK_SIZE_) {
-    var chunk = adIds.slice(i, i + AD_CREATIVES_FASTPATH_CHUNK_SIZE_);
-    var url = 'https://graph.facebook.com/v18.0/?ids=' + encodeURIComponent(chunk.join(',')) +
-      '&fields=' + encodeURIComponent('id,name,effective_status,creative{object_type}');
-    var data = fetchWithRetry_(url, 2);
-    if (!data || data.error) {
-      Logger.log('fetchAdsFastPathBatch_: chunk of ' + chunk.length + ' ad_id(s) failed — ' +
-        (data && data.error ? JSON.stringify(data.error) : 'no response from fetchWithRetry_') +
-        '. Skipping this chunk this run; these ad_ids stay missing from ad_creatives until a later run picks them up.');
-      continue;
-    }
-    // GET /?ids= responds with an object keyed by each requested id, not a data[] array.
-    chunk.forEach(function (id) {
-      var node = data[id];
-      if (!node) return; // e.g. an ad deleted between importAdData()'s fetch and this call — skip, not an error
-      out.push(node);
+  var chunkSize = 20;
+  for (var i = 0; i < adIds.length; i += chunkSize) {
+    var chunk = adIds.slice(i, i + chunkSize);
+    var requests = chunk.map(function (id) {
+      return {
+        url: 'https://graph.facebook.com/v18.0/' + id + '?fields=' + encodeURIComponent('id,name,effective_status,creative{object_type}'),
+        headers: { Authorization: 'Bearer ' + ACCESS_TOKEN },
+        muteHttpExceptions: true
+      };
     });
-    if (i + AD_CREATIVES_FASTPATH_CHUNK_SIZE_ < adIds.length) Utilities.sleep(200);
+    try {
+      var responses = UrlFetchApp.fetchAll(requests);
+      responses.forEach(function (resp, idx) {
+        if (resp.getResponseCode() === 200) {
+          try {
+            var node = JSON.parse(resp.getContentText());
+            if (node && node.id) {
+              out.push(node);
+            }
+          } catch (e) {
+            Logger.log('fetchAdsFastPathBatch_: parse error for ad_id ' + chunk[idx] + ': ' + e.message);
+          }
+        } else {
+          Logger.log('fetchAdsFastPathBatch_: ad_id ' + chunk[idx] + ' failed with status ' + resp.getResponseCode() + ' — ' + resp.getContentText());
+        }
+      });
+    } catch (e) {
+      Logger.log('fetchAdsFastPathBatch_: fetchAll error for chunk: ' + e.message);
+    }
+    if (i + chunkSize < adIds.length) Utilities.sleep(200);
   }
   return out;
 }

@@ -107,9 +107,30 @@ function fetchCampaignSettings(accountId) {
 }
 
 /**
- * HÀM 1-CLICK KÉO TOÀN BỘ DỮ LIỆU CẢ 8 TÀI KHOẢN (Campaign -> AdSet -> Ad -> Creative)
+ * HÀM 1-CLICK KÉO DỮ LIỆU CỐT LÕI (Campaign -> AdSet -> Ad)
+ * Chạy 3 tầng chính, thời gian thực thi ~2-3 phút, an toàn 100% không lo chạm ngưỡng 6 phút của Apps Script.
+ */
+function syncDataCore() {
+  Logger.log('1/3: Đang đồng bộ Campaign...');
+  if (typeof importDataFromJSON === 'function') importDataFromJSON();
+
+  Logger.log('2/3: Đang đồng bộ Ad Set...');
+  if (typeof importAdSetData === 'function') importAdSetData();
+
+  Logger.log('3/3: Đang đồng bộ Ad...');
+  if (typeof importAdData === 'function') importAdData();
+
+  Logger.log('===> HOÀN TẤT ĐỒNG BỘ DỮ LIỆU CỐT LÕI (Campaign, Ad Set, Ad)!');
+}
+
+/**
+ * HÀM 1-CLICK KÉO TOÀN BỘ DỮ LIỆU CẢ 9 TÀI KHOẢN (Campaign -> AdSet -> Ad -> Creative -> Breakdown)
+ * Có cơ chế kiểm tra thời gian thực thi để tránh bị Google Apps Script ngắt đột ngột (giới hạn 6 phút).
  */
 function syncTatCaDuLieu() {
+  var t0 = Date.now();
+  var MAX_SAFE_MS = 250000; // 4 phút 10 giây (dưới ngưỡng 6 phút để tránh crash timeout)
+
   Logger.log('1/5: Đang đồng bộ Campaign...');
   if (typeof importDataFromJSON === 'function') importDataFromJSON();
 
@@ -119,11 +140,27 @@ function syncTatCaDuLieu() {
   Logger.log('3/5: Đang đồng bộ Ad...');
   if (typeof importAdData === 'function') importAdData();
 
+  var elapsed = Date.now() - t0;
+  if (elapsed > MAX_SAFE_MS) {
+    Logger.log('⚠️ [LƯU Ý] Đã đồng bộ xong 3 tầng cốt lõi (Campaign, Ad Set, Ad) sau ' + (elapsed / 1000).toFixed(1) + 's.');
+    Logger.log('⚠️ Để không vượt quá giới hạn 6 phút của Google Apps Script, vui lòng chạy riêng các hàm sau:');
+    Logger.log('   👉 Bước 4: Chạy hàm importAdCreatives() (sẽ tự động tiếp tục từ trang dừng trước đó)');
+    Logger.log('   👉 Bước 5: Chạy hàm importBreakdownData()');
+    return;
+  }
+
   Logger.log('4/5: Đang cache Creative thumbnail...');
   if (typeof importAdCreatives === 'function') importAdCreatives();
+
+  elapsed = Date.now() - t0;
+  if (elapsed > MAX_SAFE_MS) {
+    Logger.log('⚠️ [LƯU Ý] Đã hoàn thành bước Creative sau ' + (elapsed / 1000).toFixed(1) + 's.');
+    Logger.log('⚠️ Vui lòng chạy riêng hàm importBreakdownData() để đồng bộ 5 loại breakdown còn lại.');
+    return;
+  }
 
   Logger.log('5/5: Đang đồng bộ dữ liệu Breakdown: Age, Gender, Platform, Placement, Region...');
   if (typeof importBreakdownData === 'function') importBreakdownData();
 
-  Logger.log('===> HOÀN TẤT ĐỒNG BỘ DỮ LIỆU BAN ĐẦU!');
+  Logger.log('===> HOÀN TẤT ĐỒNG BỘ TOÀN BỘ DỮ LIỆU BAN ĐẦU!');
 }
