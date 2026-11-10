@@ -1,0 +1,3 @@
+# Ignore example config
+Config.example.gs
+**/Config.example.gs

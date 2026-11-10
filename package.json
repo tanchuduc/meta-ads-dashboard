@@ -1,0 +1,11 @@
+{
+  "name": "meta-ads-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "push": "npx @google/clasp push --force",
+    "pull": "npx @google/clasp pull",
+    "status": "npx @google/clasp status",
+    "login": "npx @google/clasp login"
+  }
+}
