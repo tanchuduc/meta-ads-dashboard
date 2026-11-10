@@ -1344,19 +1344,26 @@ function getAdSetCampaigns(filters) {
   var idx = resolveHeaders(range[headerRowIdx]);
   if (idx.campaignName === -1) return { campaigns: [], totalCampaigns: 0 };
 
+  var selectedAccounts = filters.accountIds || (filters.accountId ? [filters.accountId] : []);
+  var filterAccount = selectedAccounts.length > 0 && selectedAccounts.indexOf('ALL') === -1;
+
   var fromTs = filters.dateFrom ? new Date(filters.dateFrom).getTime() : -Infinity;
   var toTs = filters.dateTo ? new Date(filters.dateTo).getTime() + 86399999 : Infinity;
   var activeOnly = !!filters.activeOnly;
 
   var all = {}, active = {};
   range.slice(headerRowIdx + 1).forEach(function (r) {
+    if (filterAccount && idx.accountId !== -1) {
+      var acc = String(r[idx.accountId] || '').trim();
+      if (acc && selectedAccounts.indexOf(acc) === -1) return;
+    }
     var c = String(r[idx.campaignName] || '').trim();
     if (!c) return;
     all[c] = true;
     if (!activeOnly) return;
     var dateStr = idx.reportingEnds === -1 ? '' : toDateString(r[idx.reportingEnds]);
     var ts = tsOf(dateStr);
-    if (isNaN(ts) || ts < fromTs || ts > toTs) return;   // outside the chosen window — doesn't count as "active" for it
+    if (isNaN(ts) || ts < fromTs || ts > toTs) return;
     var spent = idx.spent === -1 ? 0 : toNumber(r[idx.spent]);
     if (spent > 0) active[c] = true;
   });

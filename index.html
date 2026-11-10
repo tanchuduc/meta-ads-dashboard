@@ -31,8 +31,9 @@
     @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
     .dashboard-header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px;
       background:linear-gradient(135deg, var(--meta-tint), #fff 60%);border:1px solid var(--border);
-      border-radius:var(--radius);padding:16px 22px;box-shadow:var(--shadow);margin-bottom:18px}
+      border-radius:var(--radius);padding:14px 20px;box-shadow:var(--shadow);margin-bottom:18px;position:relative;z-index:90}
     .header-left{display:flex;align-items:center;gap:14px}
+    .header-center{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
     .tb-logo-img{height:52px;width:auto;border-radius:12px;display:block;box-shadow:0 3px 12px rgba(242,84,91,.35)}
     .logo-text h1{font-size:22px;font-weight:800;letter-spacing:-.5px;color:var(--text-primary);display:flex;align-items:center;gap:9px}
     .logo-text span{font-size:12px;color:var(--text-secondary);font-weight:500;display:block;margin-top:1px}
@@ -42,6 +43,82 @@
     .datetime i{margin-right:8px;color:var(--meta-blue)}
     .refresh-btn{padding:9px 18px;background:var(--brand);color:#fff;border:none;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;transition:var(--transition);display:flex;align-items:center;gap:8px;box-shadow:0 2px 8px rgba(242,84,91,.35)}
     .refresh-btn:hover{background:var(--brand-dark);transform:translateY(-2px)}
+
+    /* ── Multi-Account Selector & Meta-Style Date Picker (Nov 2026) ── */
+    .custom-dropdown-wrap{position:relative;display:flex;flex-direction:column}
+    .dropdown-label{font-size:10px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;display:flex;align-items:center;gap:5px}
+    .dropdown-label i{color:var(--meta-blue)}
+    .dropdown-trigger-btn{display:flex;align-items:center;gap:9px;padding:7px 14px;font-size:13px;font-weight:600;border-radius:8px;border:1.5px solid var(--meta-blue);background:var(--card-bg);color:var(--text-primary);cursor:pointer;outline:none;box-shadow:var(--shadow);transition:var(--transition);user-select:none;font-family:var(--font)}
+    .dropdown-trigger-btn:hover{background:var(--meta-tint);border-color:var(--meta-blue-2)}
+    .dropdown-trigger-btn .trigger-icon{color:var(--meta-blue);font-size:14px}
+    .dropdown-trigger-btn .trigger-text{max-width:210px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .dropdown-trigger-btn .badge{background:var(--meta-blue);color:#fff;font-size:11px;font-weight:700;padding:2px 7px;border-radius:10px;line-height:1}
+    .dropdown-trigger-btn .chevron{font-size:11px;color:var(--text-secondary);margin-left:4px;transition:transform .2s ease}
+    .custom-dropdown-wrap.open .dropdown-trigger-btn .chevron{transform:rotate(180deg)}
+    .custom-dropdown-popover{position:absolute;top:calc(100% + 8px);left:0;background:var(--card-bg);border:1px solid var(--border);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.18);z-index:1000;display:none;animation:popoverFadeIn .18s ease-out}
+    @keyframes popoverFadeIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+    .custom-dropdown-wrap.open .custom-dropdown-popover{display:block}
+
+    /* Account Popover */
+    #accountDropdownPopover{width:330px;padding:14px}
+    .popover-search{position:relative;margin-bottom:8px}
+    .popover-search i{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-secondary);font-size:12px}
+    .popover-search input{width:100%;padding:7px 10px 7px 30px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--bg);outline:none;font-family:var(--font)}
+    .popover-search input:focus{border-color:var(--meta-blue);background:#fff}
+    .popover-quick-bar{display:flex;justify-content:space-between;align-items:center;padding:6px 4px 8px 4px;border-bottom:1px solid var(--border);font-size:12px}
+    .quick-check-all{display:flex;align-items:center;gap:7px;font-weight:600;cursor:pointer;color:var(--text-primary)}
+    .quick-check-all input[type="checkbox"],.account-item input[type="checkbox"]{width:16px;height:16px;accent-color:var(--meta-blue);cursor:pointer}
+    .text-link-btn{background:none;border:none;color:var(--meta-blue);font-size:12px;font-weight:600;cursor:pointer;padding:2px 6px}
+    .text-link-btn:hover{text-decoration:underline}
+    .popover-list{max-height:250px;overflow-y:auto;padding:6px 0}
+    .account-item{display:flex;align-items:flex-start;gap:9px;padding:8px 8px;border-radius:6px;cursor:pointer;transition:background .15s}
+    .account-item:hover{background:var(--bg)}
+    .account-item-info{display:flex;flex-direction:column;gap:2px}
+    .account-item-name{font-size:12.5px;font-weight:600;color:var(--text-primary)}
+    .account-item-id{font-size:10.5px;color:var(--text-secondary);font-family:monospace}
+    .popover-footer{display:flex;justify-content:space-between;align-items:center;padding-top:10px;border-top:1px solid var(--border);margin-top:4px}
+    .count-text{font-size:12px;font-weight:600;color:var(--text-secondary)}
+    .btn-meta-apply{background:var(--meta-blue);color:#fff;border:none;border-radius:18px;padding:7px 18px;font-size:13px;font-weight:700;cursor:pointer;transition:var(--transition);font-family:var(--font)}
+    .btn-meta-apply:hover{background:var(--meta-blue-dark);transform:translateY(-1px)}
+    .btn-cancel{background:transparent;color:var(--text-secondary);border:none;font-size:13px;font-weight:600;cursor:pointer;padding:7px 14px;font-family:var(--font)}
+    .btn-cancel:hover{color:var(--text-primary)}
+
+    /* Meta Ads Style Date Range Popover */
+    #datePickerPopover{width:560px;padding:16px 20px;right:0;left:auto}
+    @media (max-width:850px){#datePickerPopover{width:320px}.dual-calendar-container{flex-direction:column}}
+    .date-popover-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .popover-heading{font-size:13.5px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:7px}
+    .popover-heading i{color:var(--meta-blue)}
+    .preset-select-wrap select{padding:6px 12px;font-size:12.5px;font-weight:600;border:1.5px solid var(--meta-blue);border-radius:8px;background:#fff;color:var(--text-primary);outline:none;cursor:pointer;font-family:var(--font)}
+    .date-quick-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+    .chip-btn{background:var(--bg);border:1px solid var(--border);border-radius:16px;padding:4px 12px;font-size:11.5px;font-weight:600;color:var(--text-secondary);cursor:pointer;transition:var(--transition);font-family:var(--font)}
+    .chip-btn:hover{border-color:var(--meta-blue);color:var(--meta-blue)}
+    .chip-btn.active{background:var(--meta-tint);border-color:var(--meta-blue);color:var(--meta-blue)}
+    .dual-calendar-container{display:flex;gap:20px;margin-bottom:14px}
+    .cal-panel{flex:1}
+    .cal-title{font-size:12px;font-weight:700;color:var(--text-secondary);text-align:center;margin-bottom:8px}
+    .cal-nav{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding:0 4px}
+    .cal-month-label{font-size:12.5px;font-weight:700;color:var(--text-primary)}
+    .cal-nav-btns{display:flex;gap:4px}
+    .cal-nav-btns button{width:26px;height:26px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text-secondary);display:flex;align-items:center;justify-content:center;font-size:11px;cursor:pointer}
+    .cal-nav-btns button:hover{background:var(--card-bg);color:var(--meta-blue);border-color:var(--meta-blue)}
+    .cal-weekdays{display:grid;grid-template-columns:repeat(7,1fr);text-align:center;font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:6px}
+    .cal-days-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px 0;text-align:center}
+    .cal-day-cell{height:30px;display:flex;align-items:center;justify-content:center;font-size:12px;cursor:pointer;user-select:none;position:relative;border-radius:0}
+    .cal-day-cell:hover:not(.empty){background:var(--meta-tint);border-radius:15px}
+    .cal-day-cell.empty{cursor:default}
+    .cal-day-cell.in-range{background:#EBF3FF}
+    .cal-day-cell.range-start{background:#EBF3FF;border-top-left-radius:15px;border-bottom-left-radius:15px}
+    .cal-day-cell.range-end{background:#EBF3FF;border-top-right-radius:15px;border-bottom-right-radius:15px}
+    .cal-day-cell.selected{background:var(--meta-blue)!important;color:#fff!important;font-weight:700;border-radius:15px!important;z-index:2}
+    .date-manual-inputs{display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px dashed var(--border);margin-bottom:10px}
+    .manual-input-box{display:flex;align-items:center;gap:8px;flex:1}
+    .manual-input-box label{font-size:11px;font-weight:700;color:var(--text-secondary);white-space:nowrap}
+    .manual-input-box input[type="date"]{width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:var(--font);background:var(--bg)}
+    .manual-sep{color:var(--text-secondary);font-size:13px}
+    .date-popover-footer{display:flex;justify-content:space-between;align-items:center;padding-top:10px;border-top:1px solid var(--border)}
+    .footer-summary{font-size:12px;color:var(--text-secondary);font-weight:500}
+    .footer-actions{display:flex;align-items:center;gap:10px}
 
     /* ── Pipeline freshness strip (Sep 2026) ──
        Answers "when did the SHEETS actually last succeed" — distinct from the footer's
@@ -586,7 +663,7 @@
     </div>
   </div>
 </div>
-<div class="landing-overlay" id="landingOverlay">
+<div class="landing-overlay" id="landingOverlay" style="display:none">
   <div class="landing-card">
     <div id="landingChoice">
       <h2><i class="fa-brands fa-meta"></i> Meta Ads Dashboard &mdash; Acme Co</h2>
@@ -627,21 +704,129 @@
       <h1><i class="fa-brands fa-meta" style="color:var(--meta-blue)"></i> Meta Ads Dashboard</h1>
       <span>Quản lý Đa Tài Khoản &middot; Performance Analytics</span>
     </div>
-    <div class="account-selector-wrap" style="margin-left:24px;display:flex;flex-direction:column;">
-      <label style="font-size:10px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">
-        <i class="fa-brands fa-meta" style="color:var(--meta-blue)"></i> Chọn Tài khoản Quảng cáo
-      </label>
-      <select id="globalAccountSelect" onchange="onAccountSelectChange(this.value)" style="padding:6px 12px;font-size:13px;font-weight:600;border-radius:8px;border:1.5px solid var(--meta-blue);background:var(--card-bg);color:var(--text-primary);cursor:pointer;outline:none;min-width:240px;box-shadow:var(--shadow);">
-        <option value="ALL">🌟 Tất cả tài khoản (8 TKQC)</option>
-        <option value="act_988452388193871">Alpha 1 GMT +7 20tr - Hoa</option>
-        <option value="act_3863604326993604">TKQC Alpha 2 GMT-7- Hoa</option>
-        <option value="act_140020454941995">Alpha 5 GMT -7 - Tấn</option>
-        <option value="act_856434001679007">Alpha 3 GMT-3 MKT AB - Thảo</option>
-        <option value="act_1855997818105694">Alpha 6 - GMT -3 - Tấn</option>
-        <option value="act_542081774682636">Alpha 7 - GMT-3 - HTXB - Phương</option>
-        <option value="act_848982799482573">Alpha 8 - GMT-4 (11h) - MKT Sống</option>
-        <option value="act_2929843193813956">TKQC MED - Alpha 10 GMT +7 (0h)</option>
-      </select>
+  </div>
+
+  <div class="header-center">
+    <!-- 1. MULTI-SELECT ACCOUNT FILTER -->
+    <div class="custom-dropdown-wrap" id="accountMultiSelectWrap">
+      <label class="dropdown-label"><i class="fa-brands fa-meta"></i> Tài khoản quảng cáo</label>
+      <button type="button" class="dropdown-trigger-btn" id="accountMultiBtn" onclick="toggleAccountDropdown(event)">
+        <span class="trigger-icon"><i class="fas fa-layer-group"></i></span>
+        <span class="trigger-text" id="accountMultiBtnText">🌟 Tất cả tài khoản (8 TKQC)</span>
+        <span class="badge" id="accountMultiBadge" style="display:none">8</span>
+        <i class="fas fa-chevron-down chevron"></i>
+      </button>
+      <div class="custom-dropdown-popover" id="accountDropdownPopover">
+        <div class="popover-search">
+          <i class="fas fa-search"></i>
+          <input type="text" id="accountSearchInput" placeholder="Tìm kiếm tài khoản..." oninput="filterAccountList(this.value)">
+        </div>
+        <div class="popover-quick-bar">
+          <label class="quick-check-all">
+            <input type="checkbox" id="selectAllAccountsCheck" onchange="toggleSelectAllAccounts(this.checked)" checked>
+            <span>Chọn tất cả (8)</span>
+          </label>
+          <button type="button" class="text-link-btn" onclick="clearAllAccounts()">Bỏ chọn</button>
+        </div>
+        <div class="popover-list" id="accountCheckboxList"></div>
+        <div class="popover-footer">
+          <span class="count-text" id="accountSelectedCount">Đã chọn: 8 / 8</span>
+          <button type="button" class="btn-meta-apply" onclick="applyAccountSelection()">Áp dụng</button>
+        </div>
+      </div>
+    </div>
+    <!-- Hidden fallback for backward compatibility -->
+    <select id="globalAccountSelect" style="display:none"></select>
+
+    <!-- 2. HEADER DATE RANGE PICKER (META ADS MANAGER STYLE) -->
+    <div class="custom-dropdown-wrap" id="headerDatePickerWrap">
+      <label class="dropdown-label"><i class="fas fa-calendar-alt"></i> Khoảng thời gian</label>
+      <button type="button" class="dropdown-trigger-btn header-date-btn" id="headerDateBtn" onclick="toggleDateRangePopover(event)">
+        <span class="trigger-icon"><i class="fas fa-calendar-day"></i></span>
+        <span class="trigger-text" id="headerDateRangeLabel">7 ngày qua</span>
+        <i class="fas fa-chevron-down chevron"></i>
+      </button>
+      <div class="custom-dropdown-popover date-picker-popover" id="datePickerPopover">
+        <div class="date-popover-top">
+          <div class="popover-heading"><i class="fas fa-calendar-alt"></i> Chọn thời gian</div>
+          <div class="preset-select-wrap">
+            <select id="datePresetSelect" onchange="onDatePresetChange(this.value)">
+              <option value="today">Hôm nay</option>
+              <option value="yesterday">Hôm qua</option>
+              <option value="last7d" selected>7 ngày qua</option>
+              <option value="last14d">14 ngày qua</option>
+              <option value="last30d">30 ngày qua</option>
+              <option value="this_month">Tháng này</option>
+              <option value="last_month">Tháng trước</option>
+              <option value="this_year">Năm nay</option>
+              <option value="last_year">Năm ngoái</option>
+              <option value="max">Tối đa</option>
+              <option value="custom">Tùy chỉnh</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="date-quick-chips">
+          <button type="button" class="chip-btn" data-preset="today" onclick="selectQuickChip('today')">Hôm nay</button>
+          <button type="button" class="chip-btn" data-preset="yesterday" onclick="selectQuickChip('yesterday')">Hôm qua</button>
+          <button type="button" class="chip-btn active" data-preset="last7d" onclick="selectQuickChip('last7d')">7 ngày qua</button>
+          <button type="button" class="chip-btn" data-preset="last30d" onclick="selectQuickChip('last30d')">30 ngày qua</button>
+          <button type="button" class="chip-btn" data-preset="this_month" onclick="selectQuickChip('this_month')">Tháng này</button>
+          <button type="button" class="chip-btn" data-preset="last_month" onclick="selectQuickChip('last_month')">Tháng trước</button>
+        </div>
+
+        <div class="dual-calendar-container">
+          <div class="cal-panel" id="startCalPanel">
+            <div class="cal-title">Ngày bắt đầu</div>
+            <div class="cal-nav">
+              <span class="cal-month-label" id="startCalMonthLabel">THG 11 2026</span>
+              <div class="cal-nav-btns">
+                <button type="button" class="cal-btn-prev" onclick="navStartCal(-1)"><i class="fas fa-chevron-left"></i></button>
+                <button type="button" class="cal-btn-next" onclick="navStartCal(1)"><i class="fas fa-chevron-right"></i></button>
+              </div>
+            </div>
+            <div class="cal-weekdays">
+              <span>T2</span><span>T3</span><span>T4</span><span>T5</span><span>T6</span><span>T7</span><span>CN</span>
+            </div>
+            <div class="cal-days-grid" id="startCalGrid"></div>
+          </div>
+
+          <div class="cal-panel" id="endCalPanel">
+            <div class="cal-title">Ngày kết thúc</div>
+            <div class="cal-nav">
+              <span class="cal-month-label" id="endCalMonthLabel">THG 11 2026</span>
+              <div class="cal-nav-btns">
+                <button type="button" class="cal-btn-prev" onclick="navEndCal(-1)"><i class="fas fa-chevron-left"></i></button>
+                <button type="button" class="cal-btn-next" onclick="navEndCal(1)"><i class="fas fa-chevron-right"></i></button>
+              </div>
+            </div>
+            <div class="cal-weekdays">
+              <span>T2</span><span>T3</span><span>T4</span><span>T5</span><span>T6</span><span>T7</span><span>CN</span>
+            </div>
+            <div class="cal-days-grid" id="endCalGrid"></div>
+          </div>
+        </div>
+
+        <div class="date-manual-inputs">
+          <div class="manual-input-box">
+            <label>Từ ngày:</label>
+            <input type="date" id="headerDateFrom" onchange="onManualDateChange()">
+          </div>
+          <span class="manual-sep">&rarr;</span>
+          <div class="manual-input-box">
+            <label>Đến ngày:</label>
+            <input type="date" id="headerDateTo" onchange="onManualDateChange()">
+          </div>
+        </div>
+
+        <div class="date-popover-footer">
+          <div class="footer-summary" id="dateRangeSummaryText">Đang chọn: 7 ngày qua</div>
+          <div class="footer-actions">
+            <button type="button" class="btn-cancel" onclick="closeDateRangePopover()">Hủy</button>
+            <button type="button" class="btn-meta-apply" onclick="applyHeaderDateRange()">Áp dụng</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
   <div class="header-right">
@@ -707,11 +892,11 @@
         Show active campaigns only <span class="hint" id="adsetActiveOnlyHint"></span>
       </label>
     </div>
-    <div class="filter-group">
+    <div class="filter-group" style="display:none">
       <label><i class="fas fa-calendar"></i> Date From</label>
       <input type="date" id="adsetDateFrom">
     </div>
-    <div class="filter-group">
+    <div class="filter-group" style="display:none">
       <label><i class="fas fa-calendar"></i> Date To</label>
       <input type="date" id="adsetDateTo">
     </div>
@@ -747,11 +932,11 @@
       <label><i class="fas fa-search"></i> Search ad name</label>
       <input type="text" id="adsSearch" placeholder="Type to filter..." oninput="debouncedLoadAds_()">
     </div>
-    <div class="filter-group">
+    <div class="filter-group" style="display:none">
       <label><i class="fas fa-calendar"></i> Date From</label>
       <input type="date" id="adsDateFrom">
     </div>
-    <div class="filter-group">
+    <div class="filter-group" style="display:none">
       <label><i class="fas fa-calendar"></i> Date To</label>
       <input type="date" id="adsDateTo">
     </div>
@@ -788,11 +973,11 @@
       <input type="text" id="filterSearch" list="campaignSuggestions" autocomplete="off" placeholder="Type to search or pick from the list...">
       <datalist id="campaignSuggestions"></datalist>
     </div>
-    <div class="filter-group">
+    <div class="filter-group" style="display:none">
       <label><i class="fas fa-calendar"></i> Date From</label>
       <input type="date" id="filterDateFrom">
     </div>
-    <div class="filter-group">
+    <div class="filter-group" style="display:none">
       <label><i class="fas fa-calendar"></i> Date To</label>
       <input type="date" id="filterDateTo">
     </div>
@@ -810,7 +995,7 @@
       <span class="filter-status" id="campFilterStatus"></span>
     </div>
   </div>
-  <div class="date-pills">
+  <div class="date-pills" style="display:none">
     <span class="lbl">Quick range</span>
     <button class="pill" data-pill="7" onclick="setPill('7')">Last 7d</button>
     <button class="pill" data-pill="30" onclick="setPill('30')">Last 30d</button>
@@ -1319,34 +1504,464 @@
     });
   }
 
+  /* ── MULTI-ACCOUNT & META DATE RANGE LOGIC (Nov 2026) ── */
+  var DASHBOARD_ACCOUNTS = [
+    { id: 'act_988452388193871', name: 'Alpha 1 GMT +7 20tr - Hoa' },
+    { id: 'act_3863604326993604', name: 'TKQC Alpha 2 GMT-7- Hoa' },
+    { id: 'act_140020454941995', name: 'Alpha 5 GMT -7 - Tấn' },
+    { id: 'act_856434001679007', name: 'Alpha 3 GMT-3 MKT AB - Thảo' },
+    { id: 'act_1855997818105694', name: 'Alpha 6 - GMT -3 - Tấn' },
+    { id: 'act_542081774682636', name: 'Alpha 7 - GMT-3 - HTXB - Phương' },
+    { id: 'act_848982799482573', name: 'Alpha 8 - GMT-4 (11h) - MKT Sống' },
+    { id: 'act_2929843193813956', name: 'TKQC MED - Alpha 10 GMT +7 (0h)' }
+  ];
+  var selectedAccountIds = DASHBOARD_ACCOUNTS.map(function(a){ return a.id; });
+
+  var currentRange = { preset: 'last7d', from: '', to: '' };
+  var tempRange = { preset: 'last7d', from: '', to: '' };
+  var startViewDate = new Date();
+  var endViewDate = new Date();
+
+  function initAccountSelector(){
+    var listEl = document.getElementById('accountCheckboxList');
+    if(!listEl) return;
+    listEl.innerHTML = DASHBOARD_ACCOUNTS.map(function(acc){
+      var isChecked = selectedAccountIds.indexOf(acc.id) !== -1;
+      return '<label class="account-item" data-name="'+esc(acc.name.toLowerCase())+'" data-id="'+acc.id+'">'+
+        '<input type="checkbox" value="'+acc.id+'" '+(isChecked?'checked':'')+' onchange="onAccountCheckboxChange()">'+
+        '<div class="account-item-info">'+
+          '<span class="account-item-name">'+esc(acc.name)+'</span>'+
+          '<span class="account-item-id">'+acc.id+'</span>'+
+        '</div>'+
+      '</label>';
+    }).join('');
+    updateAccountSelectorUI();
+  }
+
+  function toggleAccountDropdown(e){
+    if(e) e.stopPropagation();
+    var wrap = document.getElementById('accountMultiSelectWrap');
+    var isCurrentlyOpen = wrap && wrap.classList.contains('open');
+    closeAllPopovers();
+    if(wrap && !isCurrentlyOpen) wrap.classList.add('open');
+  }
+
+  function closeAllPopovers(){
+    var accWrap = document.getElementById('accountMultiSelectWrap');
+    if(accWrap) accWrap.classList.remove('open');
+    var dateWrap = document.getElementById('headerDatePickerWrap');
+    if(dateWrap) dateWrap.classList.remove('open');
+  }
+
+  function filterAccountList(query){
+    query = (query || '').toLowerCase().trim();
+    var items = document.querySelectorAll('#accountCheckboxList .account-item');
+    items.forEach(function(item){
+      var name = item.getAttribute('data-name') || '';
+      var id = item.getAttribute('data-id') || '';
+      var match = !query || name.indexOf(query) !== -1 || id.indexOf(query) !== -1;
+      item.style.display = match ? 'flex' : 'none';
+    });
+  }
+
+  function toggleSelectAllAccounts(checked){
+    var cbs = document.querySelectorAll('#accountCheckboxList input[type="checkbox"]');
+    cbs.forEach(function(cb){ cb.checked = checked; });
+    onAccountCheckboxChange();
+  }
+
+  function clearAllAccounts(){
+    toggleSelectAllAccounts(false);
+  }
+
+  function onAccountCheckboxChange(){
+    var cbs = document.querySelectorAll('#accountCheckboxList input[type="checkbox"]');
+    var checkedCount = 0;
+    cbs.forEach(function(cb){ if(cb.checked) checkedCount++; });
+    var allCb = document.getElementById('selectAllAccountsCheck');
+    if(allCb) {
+      allCb.checked = (checkedCount === cbs.length);
+      allCb.indeterminate = (checkedCount > 0 && checkedCount < cbs.length);
+    }
+    var countEl = document.getElementById('accountSelectedCount');
+    if(countEl) countEl.textContent = 'Đã chọn: ' + checkedCount + ' / ' + cbs.length;
+  }
+
+  function getSelectedAccountIds(){
+    var cbs = document.querySelectorAll('#accountCheckboxList input[type="checkbox"]');
+    if(!cbs.length) return selectedAccountIds.slice();
+    var ids = [];
+    cbs.forEach(function(cb){ if(cb.checked) ids.push(cb.value); });
+    if(ids.length === DASHBOARD_ACCOUNTS.length) return ['ALL'];
+    return ids;
+  }
+
+  function updateAccountSelectorUI(){
+    var ids = getSelectedAccountIds();
+    var btnText = document.getElementById('accountMultiBtnText');
+    var badge = document.getElementById('accountMultiBadge');
+    var countEl = document.getElementById('accountSelectedCount');
+    if(ids.indexOf('ALL') !== -1 || ids.length === DASHBOARD_ACCOUNTS.length){
+      if(btnText) btnText.innerHTML = '🌟 Tất cả tài khoản (8 TKQC)';
+      if(badge) badge.style.display = 'none';
+      if(countEl) countEl.textContent = 'Đã chọn: 8 / 8';
+    } else if(ids.length === 0){
+      if(btnText) btnText.innerHTML = '⚠️ Chưa chọn tài khoản';
+      if(badge) badge.style.display = 'none';
+      if(countEl) countEl.textContent = 'Đã chọn: 0 / 8';
+    } else if(ids.length === 1){
+      var acc = DASHBOARD_ACCOUNTS.find(function(a){ return a.id === ids[0]; });
+      if(btnText) btnText.textContent = acc ? acc.name : ids[0];
+      if(badge) { badge.style.display = 'inline-block'; badge.textContent = '1'; }
+      if(countEl) countEl.textContent = 'Đã chọn: 1 / 8';
+    } else {
+      if(btnText) btnText.textContent = ids.length + ' tài khoản đã chọn';
+      if(badge) { badge.style.display = 'inline-block'; badge.textContent = ids.length; }
+      if(countEl) countEl.textContent = 'Đã chọn: ' + ids.length + ' / 8';
+    }
+  }
+
+  function applyAccountSelection(){
+    var ids = getSelectedAccountIds();
+    if(ids.length === 0){
+      showToast('Vui lòng chọn ít nhất 1 tài khoản quảng cáo.');
+      return;
+    }
+    selectedAccountIds = (ids.indexOf('ALL') !== -1) ? DASHBOARD_ACCOUNTS.map(function(a){ return a.id; }) : ids.slice();
+    updateAccountSelectorUI();
+    closeAllPopovers();
+
+    if(activeLevel === 'adset'){
+      populateAdSetCampaigns();
+      loadAdSetData();
+    } else if(activeLevel === 'ad'){
+      loadAdsData();
+    } else {
+      applyFilters();
+    }
+  }
+
+  /* ── META ADS DATE RANGE PICKER LOGIC ── */
+  function computePresetDates(preset){
+    var today = new Date();
+    var y = today.getFullYear(), m = today.getMonth(), d = today.getDate();
+    var fromDate, toDate;
+
+    switch(preset){
+      case 'today':
+        fromDate = new Date(y, m, d);
+        toDate = new Date(y, m, d);
+        break;
+      case 'yesterday':
+        fromDate = new Date(y, m, d - 1);
+        toDate = new Date(y, m, d - 1);
+        break;
+      case 'last7d':
+        fromDate = new Date(y, m, d - 6);
+        toDate = new Date(y, m, d);
+        break;
+      case 'last14d':
+        fromDate = new Date(y, m, d - 13);
+        toDate = new Date(y, m, d);
+        break;
+      case 'last30d':
+        fromDate = new Date(y, m, d - 29);
+        toDate = new Date(y, m, d);
+        break;
+      case 'this_month':
+        fromDate = new Date(y, m, 1);
+        toDate = new Date(y, m, d);
+        break;
+      case 'last_month':
+        fromDate = new Date(y, m - 1, 1);
+        toDate = new Date(y, m, 0);
+        break;
+      case 'this_year':
+        fromDate = new Date(y, 0, 1);
+        toDate = new Date(y, m, d);
+        break;
+      case 'last_year':
+        fromDate = new Date(y - 1, 0, 1);
+        toDate = new Date(y - 1, 11, 31);
+        break;
+      case 'max':
+        fromDate = new Date(2024, 0, 1);
+        toDate = new Date(y, m, d);
+        break;
+      case 'custom':
+      default:
+        return null;
+    }
+    return { from: ymd(fromDate), to: ymd(toDate) };
+  }
+
+  function formatDateVN(dateStr){
+    if(!dateStr) return '';
+    var parts = dateStr.split('-');
+    if(parts.length !== 3) return dateStr;
+    var day = parseInt(parts[2], 10);
+    var month = parseInt(parts[1], 10);
+    var year = parts[0];
+    return day + ' thg ' + month + ', ' + year;
+  }
+
+  function getRangeDisplayText(from, to, preset){
+    if(!from || !to) return 'Khoảng thời gian';
+    if(preset === 'today') return 'Hôm nay (' + formatDateVN(from) + ')';
+    if(preset === 'yesterday') return 'Hôm qua (' + formatDateVN(from) + ')';
+    if(preset === 'last7d') return '7 ngày qua (' + formatDateVN(from) + ' - ' + formatDateVN(to) + ')';
+    if(preset === 'last14d') return '14 ngày qua (' + formatDateVN(from) + ' - ' + formatDateVN(to) + ')';
+    if(preset === 'last30d') return '30 ngày qua (' + formatDateVN(from) + ' - ' + formatDateVN(to) + ')';
+    if(preset === 'this_month') return 'Tháng này (' + formatDateVN(from) + ' - ' + formatDateVN(to) + ')';
+    if(preset === 'last_month') return 'Tháng trước (' + formatDateVN(from) + ' - ' + formatDateVN(to) + ')';
+    if(preset === 'last_year') return formatDateVN(from) + ' - ' + formatDateVN(to);
+    if(preset === 'this_year') return 'Năm nay (' + formatDateVN(from) + ' - ' + formatDateVN(to) + ')';
+    return formatDateVN(from) + ' - ' + formatDateVN(to);
+  }
+
+  function initHeaderDatePicker(){
+    var initP = computePresetDates('last7d');
+    if(initP){
+      currentRange.from = initP.from;
+      currentRange.to = initP.to;
+      currentRange.preset = 'last7d';
+      tempRange.from = initP.from;
+      tempRange.to = initP.to;
+      tempRange.preset = 'last7d';
+      startViewDate = new Date(tempRange.from);
+      endViewDate = new Date(tempRange.to);
+
+      // sync to legacy inputs
+      ['filterDateFrom', 'adsetDateFrom', 'adsDateFrom'].forEach(function(id){
+        var el = document.getElementById(id); if(el) el.value = currentRange.from;
+      });
+      ['filterDateTo', 'adsetDateTo', 'adsDateTo'].forEach(function(id){
+        var el = document.getElementById(id); if(el) el.value = currentRange.to;
+      });
+    }
+    updateHeaderDateDisplay();
+  }
+
+  function toggleDateRangePopover(e){
+    if(e) e.stopPropagation();
+    var wrap = document.getElementById('headerDatePickerWrap');
+    var isCurrentlyOpen = wrap && wrap.classList.contains('open');
+    closeAllPopovers();
+    if(wrap && !isCurrentlyOpen){
+      tempRange.from = currentRange.from;
+      tempRange.to = currentRange.to;
+      tempRange.preset = currentRange.preset;
+      startViewDate = tempRange.from ? new Date(tempRange.from) : new Date();
+      endViewDate = tempRange.to ? new Date(tempRange.to) : new Date();
+      updateDateRangeModalUI();
+      wrap.classList.add('open');
+    }
+  }
+
+  function closeDateRangePopover(){
+    tempRange.from = currentRange.from;
+    tempRange.to = currentRange.to;
+    tempRange.preset = currentRange.preset;
+    closeAllPopovers();
+  }
+
+  function onDatePresetChange(preset){
+    if(preset === 'custom'){
+      tempRange.preset = 'custom';
+      updateDateRangeModalUI();
+      return;
+    }
+    var res = computePresetDates(preset);
+    if(res){
+      tempRange.preset = preset;
+      tempRange.from = res.from;
+      tempRange.to = res.to;
+      startViewDate = new Date(tempRange.from);
+      endViewDate = new Date(tempRange.to);
+      updateDateRangeModalUI();
+    }
+  }
+
+  function selectQuickChip(preset){
+    onDatePresetChange(preset);
+  }
+
+  function renderDualCalendars(){
+    renderCalendar('start', startViewDate, tempRange.from, tempRange.to);
+    renderCalendar('end', endViewDate, tempRange.from, tempRange.to);
+  }
+
+  function renderCalendar(panelType, viewDate, fromDateStr, toDateStr){
+    var gridId = (panelType === 'start') ? 'startCalGrid' : 'endCalGrid';
+    var labelId = (panelType === 'start') ? 'startCalMonthLabel' : 'endCalMonthLabel';
+    var grid = document.getElementById(gridId);
+    var label = document.getElementById(labelId);
+    if(!grid || !label) return;
+
+    var y = viewDate.getFullYear();
+    var m = viewDate.getMonth();
+    label.textContent = 'THG ' + (m + 1) + ' ' + y;
+
+    var firstDay = new Date(y, m, 1).getDay();
+    var startDayIdx = (firstDay === 0) ? 6 : (firstDay - 1);
+    var daysInMonth = new Date(y, m + 1, 0).getDate();
+
+    var fromTs = fromDateStr ? tsOf(fromDateStr) : -Infinity;
+    var toTs = toDateStr ? tsOf(toDateStr) : Infinity;
+
+    var html = '';
+    for(var i = 0; i < startDayIdx; i++){
+      html += '<div class="cal-day-cell empty"></div>';
+    }
+
+    for(var day = 1; day <= daysInMonth; day++){
+      var cellDateStr = y + '-' + ('0' + (m + 1)).slice(-2) + '-' + ('0' + day).slice(-2);
+      var cellTs = tsOf(cellDateStr);
+      var isStart = (cellDateStr === fromDateStr);
+      var isEnd = (cellDateStr === toDateStr);
+      var inRange = (cellTs > fromTs && cellTs < toTs);
+
+      var classes = ['cal-day-cell'];
+      if(isStart) classes.push('selected');
+      if(isEnd) classes.push('selected');
+      if(inRange) classes.push('in-range');
+      if(isStart && cellTs < toTs) classes.push('range-start');
+      if(isEnd && cellTs > fromTs) classes.push('range-end');
+
+      html += '<div class="' + classes.join(' ') + '" onclick="onCalendarDayClick(\'' + panelType + '\',\'' + cellDateStr + '\')">' + day + '</div>';
+    }
+    grid.innerHTML = html;
+  }
+
+  function onCalendarDayClick(panelType, dateStr){
+    if(panelType === 'start'){
+      tempRange.from = dateStr;
+      if(!tempRange.to || tsOf(tempRange.from) > tsOf(tempRange.to)){
+        tempRange.to = tempRange.from;
+      }
+    } else {
+      tempRange.to = dateStr;
+      if(!tempRange.from || tsOf(tempRange.to) < tsOf(tempRange.from)){
+        tempRange.from = tempRange.to;
+      }
+    }
+    tempRange.preset = 'custom';
+    updateDateRangeModalUI();
+  }
+
+  function navStartCal(delta){
+    startViewDate = new Date(startViewDate.getFullYear(), startViewDate.getMonth() + delta, 1);
+    renderCalendar('start', startViewDate, tempRange.from, tempRange.to);
+  }
+
+  function navEndCal(delta){
+    endViewDate = new Date(endViewDate.getFullYear(), endViewDate.getMonth() + delta, 1);
+    renderCalendar('end', endViewDate, tempRange.from, tempRange.to);
+  }
+
+  function onManualDateChange(){
+    var fromVal = val('headerDateFrom');
+    var toVal = val('headerDateTo');
+    if(fromVal && toVal){
+      tempRange.from = fromVal;
+      tempRange.to = toVal;
+      if(tsOf(tempRange.from) > tsOf(tempRange.to)){
+        tempRange.to = tempRange.from;
+        var toEl = document.getElementById('headerDateTo');
+        if(toEl) toEl.value = tempRange.to;
+      }
+      tempRange.preset = 'custom';
+      startViewDate = new Date(tempRange.from);
+      endViewDate = new Date(tempRange.to);
+      updateDateRangeModalUI();
+    }
+  }
+
+  function updateDateRangeModalUI(){
+    var sel = document.getElementById('datePresetSelect');
+    if(sel) sel.value = tempRange.preset || 'custom';
+
+    document.querySelectorAll('.date-quick-chips .chip-btn').forEach(function(btn){
+      btn.classList.toggle('active', btn.getAttribute('data-preset') === tempRange.preset);
+    });
+
+    var fromEl = document.getElementById('headerDateFrom');
+    if(fromEl && tempRange.from) fromEl.value = tempRange.from;
+    var toEl = document.getElementById('headerDateTo');
+    if(toEl && tempRange.to) toEl.value = tempRange.to;
+
+    var summaryEl = document.getElementById('dateRangeSummaryText');
+    if(summaryEl){
+      summaryEl.textContent = 'Đang chọn: ' + getRangeDisplayText(tempRange.from, tempRange.to, tempRange.preset);
+    }
+    renderDualCalendars();
+  }
+
+  function updateHeaderDateDisplay(){
+    var labelEl = document.getElementById('headerDateRangeLabel');
+    if(labelEl){
+      labelEl.textContent = getRangeDisplayText(currentRange.from, currentRange.to, currentRange.preset);
+    }
+  }
+
+  function applyHeaderDateRange(){
+    if(!tempRange.from || !tempRange.to){
+      showToast('Vui lòng chọn ngày bắt đầu và kết thúc.');
+      return;
+    }
+    currentRange.from = tempRange.from;
+    currentRange.to = tempRange.to;
+    currentRange.preset = tempRange.preset;
+
+    // sync legacy inputs
+    ['filterDateFrom', 'adsetDateFrom', 'adsDateFrom'].forEach(function(id){
+      var el = document.getElementById(id); if(el) el.value = currentRange.from;
+    });
+    ['filterDateTo', 'adsetDateTo', 'adsDateTo'].forEach(function(id){
+      var el = document.getElementById(id); if(el) el.value = currentRange.to;
+    });
+
+    updateHeaderDateDisplay();
+    closeAllPopovers();
+
+    if(activeLevel === 'adset'){
+      populateAdSetCampaigns();
+      loadAdSetData();
+    } else if(activeLevel === 'ad'){
+      loadAdsData();
+    } else {
+      applyFilters();
+    }
+  }
+
   function readFilters(){
+    var accs = getSelectedAccountIds();
     return {
-      accountId: val('globalAccountSelect') || 'ALL',
+      accountIds: accs,
+      accountId: accs.length === 1 ? accs[0] : (accs.indexOf('ALL') !== -1 ? 'ALL' : (accs[0] || 'ALL')),
       search: val('filterSearch'),
-      dateFrom: val('filterDateFrom'),
-      dateTo: val('filterDateTo'),
+      dateFrom: currentRange.from || val('headerDateFrom') || val('filterDateFrom'),
+      dateTo: currentRange.to || val('headerDateTo') || val('filterDateTo'),
       roasMin: val('filterRoasMin'),
       objective: val('filterObjective')
     };
   }
+
   function onAccountSelectChange(accId){
-    applyFilters();
-    if (typeof loadAdSetData === 'function' && document.getElementById('adsetBar').style.display !== 'none') {
-      loadAdSetData();
-    }
-    if (typeof loadAdsData === 'function' && document.getElementById('adsBar').style.display !== 'none') {
-      loadAdsData();
-    }
+    applyAccountSelection();
   }
+
   function val(id){ var el=document.getElementById(id); return el?el.value:''; }
+
   function applyFilters(){
     loadData(readFilters());
   }
+
   function resetFilters(){
-    ['filterSearch','filterDateFrom','filterDateTo','filterRoasMin'].forEach(function(id){ document.getElementById(id).value=''; });
-    document.getElementById('filterObjective').value='';
+    ['filterSearch','filterRoasMin'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
+    var objEl = document.getElementById('filterObjective'); if(objEl) objEl.value='';
     activePill=null; updatePillUI();
-    loadData({});
+    loadData(readFilters());
   }
   function populateObjectives(){
     var sel = document.getElementById('filterObjective'), current = sel.value, set = {};
@@ -1404,7 +2019,15 @@
     }
     loadLiveToday();
   }
-  function adsetFilters(){ return { dateFrom: val('adsetDateFrom'), dateTo: val('adsetDateTo') }; }
+  function adsetFilters(){
+    var accs = getSelectedAccountIds();
+    return {
+      accountIds: accs,
+      accountId: accs.length === 1 ? accs[0] : (accs.indexOf('ALL') !== -1 ? 'ALL' : (accs[0] || 'ALL')),
+      dateFrom: currentRange.from || val('headerDateFrom') || val('adsetDateFrom'),
+      dateTo: currentRange.to || val('headerDateTo') || val('adsetDateTo')
+    };
+  }
   function resetAdSetFilters(){
     document.getElementById('adsetDateFrom').value='';
     document.getElementById('adsetDateTo').value='';
@@ -1482,9 +2105,14 @@
     return { rows:rows, campaigns:camps, campaignList:[base], summary:s, error:null };
   }
   function adsFilters(){
+    var accs = getSelectedAccountIds();
     return {
-      dateFrom: val('adsDateFrom'), dateTo: val('adsDateTo'),
-      campaignName: val('adsCampaign'), adSetName: val('adsAdSet'),
+      accountIds: accs,
+      accountId: accs.length === 1 ? accs[0] : (accs.indexOf('ALL') !== -1 ? 'ALL' : (accs[0] || 'ALL')),
+      dateFrom: currentRange.from || val('headerDateFrom') || val('adsDateFrom'),
+      dateTo: currentRange.to || val('headerDateTo') || val('adsDateTo'),
+      campaignName: val('adsCampaign'),
+      adSetName: val('adsAdSet'),
       creativeType: val('adsCreativeType'),
       search: val('adsSearch'),
       activeOnly: !!document.getElementById('adsActiveOnly').checked,
@@ -2638,13 +3266,26 @@
 
   function initDashboardAfterChoice_(){
     refreshReportCampaigns();
-    loadData({});
+    loadData(readFilters());
     loadFreshness();
     loadLiveToday();
     startLiveTodayPolling();
   }
 
   document.addEventListener('DOMContentLoaded', function(){
+    initAccountSelector();
+    initHeaderDatePicker();
+    document.addEventListener('click', function(e){
+      var accWrap = document.getElementById('accountMultiSelectWrap');
+      if(accWrap && !accWrap.contains(e.target)){
+        accWrap.classList.remove('open');
+      }
+      var dateWrap = document.getElementById('headerDatePickerWrap');
+      if(dateWrap && !dateWrap.contains(e.target)){
+        dateWrap.classList.remove('open');
+      }
+    });
+
     buildCardPanel(); buildColPanel(); buildReportPickers(); buildWidgetToggles();
     ['reportDateFrom','reportDateTo'].forEach(function(id){ var el=document.getElementById(id); if(el) el.addEventListener('change', refreshReportCampaigns); });
     ['filterDateFrom','filterDateTo'].forEach(function(id){ document.getElementById(id).addEventListener('change', function(){ activePill=null; updatePillUI(); }); });
@@ -2654,6 +3295,7 @@
     }); });
     ['adsDateFrom','adsDateTo'].forEach(function(id){ var el=document.getElementById(id); if(el) el.addEventListener('change', loadAdsData); });
     updateClock(); setInterval(updateClock, 30000);
+    initDashboardAfterChoice_();
   });
 </script>
 
