@@ -4,7 +4,7 @@
 
 var ACCESS_TOKEN = 'EAAOhgsUSolIBS6ke3vNsxPjH2K4peyf4Mm2THErTUcRQxCw6pJhQl5mGQy3Vy8oQjQvohIXLrb5FRHesEfZAoLUDWiZCIzX5VsvVOWCAPks2RjLraLbr3szthrMHCJVoMwoe1erU3ZAG6SZBxLYXXyPcYKamZAW4JpvOVBzTZAZBaeIpqTfTqzrxiQ1ClAJLZB0CxwZDZD';
 
-// Danh sách 9 tài khoản quảng cáo được phân quyền từ System User
+// Danh sách 7 tài khoản quảng cáo được phân quyền từ System User
 var AD_ACCOUNTS = [
   { id: 'act_988452388193871',  name: 'Alpha 1 GMT +7 20tr - Hoa',        shortName: 'Alpha 1 (Hoa)',    color: '#0064E0' },
   { id: 'act_3863604326993604', name: 'TKQC Alpha 2 GMT-7- Hoa',          shortName: 'Alpha 2 (Hoa)',    color: '#0866FF' },
@@ -12,8 +12,6 @@ var AD_ACCOUNTS = [
   { id: 'act_856434001679007',  name: 'Alpha 3 GMT-3 MKT AB - Thảo',      shortName: 'Alpha 3 (Thảo)',   color: '#8B5CF6' },
   { id: 'act_1855997818105694', name: 'Alpha 6 - GMT -3 - Tấn',           shortName: 'Alpha 6 (Tấn)',    color: '#059669' },
   { id: 'act_542081774682636',  name: 'Alpha 7 - GMT-3 - HTXB - Phương',   shortName: 'Alpha 7 (Phương)', color: '#F59E0B' },
-  { id: 'act_848982799482573',  name: 'Alpha 8 - GMT-4 (11h) - MKT Sống',  shortName: 'Alpha 8 (Sống)',   color: '#EC4899' },
-  { id: 'act_2929843193813956', name: 'TKQC MED - Alpha 10 GMT +7 (0h)',   shortName: 'Alpha 10 (MED)',   color: '#06B6D4' },
   { id: 'act_1845118092714419', name: 'TK 1 - MKT Alpha - Thảo',          shortName: 'TK 1 (Thảo)',      color: '#6366F1' }
 ];
 
@@ -177,7 +175,7 @@ function syncDataCore() {
 }
 
 /**
- * HÀM 1-CLICK KÉO TOÀN BỘ DỮ LIỆU CẢ 9 TÀI KHOẢN (Campaign -> AdSet -> Ad -> Creative -> Breakdown)
+ * HÀM 1-CLICK KÉO TOÀN BỘ DỮ LIỆU CẢ 7 TÀI KHOẢN (Campaign -> AdSet -> Ad -> Creative -> Breakdown)
  * Có cơ chế kiểm tra thời gian thực thi để tránh bị Google Apps Script ngắt đột ngột (giới hạn 6 phút).
  */
 function syncTatCaDuLieu() {

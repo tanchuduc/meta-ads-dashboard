@@ -333,7 +333,7 @@ var CAMPAIGN_INSIGHTS_INITIAL_CHUNK_DAYS_ = 14;   // used only by sync fallback
 var CAMPAIGN_INSIGHTS_LIMIT_STEPS_ = [200, 100, 50, 25];
 
 /**
- * Kéo dữ liệu 30 ngày gần nhất (đến hôm qua) cho cả 9 tài khoản trên TOÀN BỘ 3 TẦNG:
+ * Kéo dữ liệu 30 ngày gần nhất (đến hôm qua) cho cả 7 tài khoản trên TOÀN BỘ 3 TẦNG:
  * 1. Campaign (Ghi vào Sheet 1: Meta Ads - Campaign Data)
  * 2. AdSet (Ghi vào Sheet 2: Meta Ads - AdSet Data)
  * 3. Ad & Creative (Ghi vào Sheet 3: Meta Ads - Ad & Creative Data)
@@ -354,7 +354,7 @@ function backfillLast30Days() {
 }
 
 /**
- * Kéo dữ liệu 90 ngày gần nhất (đến hôm qua) cho cả 9 tài khoản trên TOÀN BỘ 3 TẦNG:
+ * Kéo dữ liệu 90 ngày gần nhất (đến hôm qua) cho cả 7 tài khoản trên TOÀN BỘ 3 TẦNG:
  * 1. Campaign (Sheet 1) -> 2. AdSet (Sheet 2) -> 3. Ad & Creative (Sheet 3)
  */
 function backfillLast90Days() {

@@ -72,15 +72,13 @@ Tất cả cấu hình chính được khai báo trong [`apps-script/Config.gs`]
 
 1. **Meta Marketing API Token**:
    - Access Token của System User được khai báo trong `ACCESS_TOKEN` của [`apps-script/Config.gs`](apps-script/Config.gs) (Meta Graph API v18.0).
-2. **Danh sách 9 Tài khoản quảng cáo (`AD_ACCOUNTS`)**:
+2. **Danh sách 7 Tài khoản quảng cáo (`AD_ACCOUNTS`)** (Đã loại bỏ Alpha 8 và Alpha 10 theo yêu cầu):
    - `act_988452388193871`: Alpha 1 GMT +7 20tr - Hoa
    - `act_3863604326993604`: TKQC Alpha 2 GMT-7- Hoa
    - `act_140020454941995`: Alpha 5 GMT -7 - Tấn
    - `act_856434001679007`: Alpha 3 GMT-3 MKT AB - Thảo
    - `act_1855997818105694`: Alpha 6 - GMT -3 - Tấn
    - `act_542081774682636`: Alpha 7 - GMT-3 - HTXB - Phương
-   - `act_848982799482573`: Alpha 8 - GMT-4 (11h) - MKT Sống
-   - `act_2929843193813956`: TKQC MED - Alpha 10 GMT +7 (0h)
    - `act_1845118092714419`: TK 1 - MKT Alpha - Thảo
 3. **Thư mục Google Drive lưu trữ 3 Sheet**:
    - `DRIVE_FOLDER_ID`: `1WjwUW-4iyNrLLZHfDF9fpooqHrZkSCJg`
