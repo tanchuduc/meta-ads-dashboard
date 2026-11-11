@@ -6657,7 +6657,7 @@ function renderKPIs() {
   var grid = document.getElementById('kpiGrid');
   if (!grid) return;
   if (!STATE.summary) {
-    grid.innerHTML = '';
+    grid.innerHTML = '<div class="no-data" style="grid-column:1/-1;padding:24px 16px;text-align:center;"><i class="fas fa-circle-notch fa-spin" style="font-size:20px;color:var(--text-secondary);margin-bottom:8px;"></i><p style="color:var(--text-secondary);font-size:13px;margin:0;">Đang nạp dữ liệu thẻ KPI...</p></div>';
     renderHeroGauge(null);
     return;
   }
@@ -6671,6 +6671,10 @@ function renderKPIs() {
       html += cardHTML(def, s, trendData);
     }
   });
+
+  if (!html && (!STATE.rows || STATE.rows.length === 0)) {
+    html = '<div class="no-data" style="grid-column:1/-1;padding:28px 16px;text-align:center;background:var(--card-bg);border-radius:var(--radius-md);border:1px dashed var(--border-color);"><i class="fas fa-calendar-xmark" style="font-size:24px;color:var(--text-secondary);margin-bottom:8px;"></i><h4 style="margin:0 0 4px 0;font-size:14px;color:var(--text-primary);">Chưa có dữ liệu trong khoảng ngày đã chọn</h4><p style="margin:0;font-size:12px;color:var(--text-secondary);">Thử mở rộng khoảng thời gian hoặc bấm "Làm mới" để đồng bộ số liệu mới nhất.</p></div>';
+  }
 
   grid.innerHTML = html || '<div class="no-data" style="grid-column:1/-1"><i class="fas fa-eye-slash"></i><h3>Tất cả thẻ KPI đang ẩn</h3><p>Bấm Tùy chỉnh thẻ KPI để bật lại.</p></div>';
   renderHeroGauge(s);
@@ -8096,7 +8100,7 @@ function filterCampaignsInMemory_(rawRes, filters) {
     : (selectedAccountIds && selectedAccountIds.length ? selectedAccountIds : []);
 
   var accountScopedRows = rawRows.filter(function(r) {
-    if (!targetAccounts.length) return true;
+    if (!targetAccounts.length || targetAccounts.indexOf('ALL') !== -1) return true;
     var rowAcc = String(r.accountId || '').trim();
     if (rowAcc) {
       if (targetAccounts.indexOf(rowAcc) !== -1) return true;
@@ -8117,13 +8121,24 @@ function filterCampaignsInMemory_(rawRes, filters) {
     return false;
   });
 
+  // 1b. Biên ngày khả dụng của các TKQC đã chọn
+  var minDateTs = Infinity, maxDateTs = -Infinity;
+  var minDateStr = '', maxDateStr = '';
+  accountScopedRows.forEach(function(r) {
+    var t = r.reportingEndsTs || tsOf(r.reportingEnds);
+    if (!isNaN(t) && isFinite(t)) {
+      if (t < minDateTs) { minDateTs = t; minDateStr = r.reportingEnds; }
+      if (t > maxDateTs) { maxDateTs = t; maxDateStr = r.reportingEnds; }
+    }
+  });
+
   // 2. Lọc theo biên ngày (tsOf) và chiến dịch
   var fromTs = (filters.dateFrom) ? tsOf(filters.dateFrom) : -Infinity;
   var toTs = (filters.dateTo) ? (tsOf(filters.dateTo) + 86399999) : Infinity;
   var targetCampNames = Array.isArray(filters.campaignNames) ? filters.campaignNames.filter(Boolean) : [];
   var searchNeedle = String(filters.search || '').trim().toLowerCase();
 
-  var dateAndCampFilteredRows = accountScopedRows.filter(function(r) {
+  function testDateAndCampMatch_(r, fTs, tTs) {
     if (targetCampNames.length && targetCampNames.indexOf(r.campaignName) === -1) {
       return false;
     }
@@ -8136,14 +8151,32 @@ function filterCampaignsInMemory_(rawRes, filters) {
     if (filters.objective && r.objective !== filters.objective) {
       return false;
     }
-    if (filters.dateFrom || filters.dateTo) {
+    if (filters.dateFrom || filters.dateTo || isFinite(fTs) || isFinite(tTs)) {
       var t = r.reportingEndsTs || tsOf(r.reportingEnds);
       if (isNaN(t)) return false;
-      if (filters.dateFrom && !isNaN(fromTs) && t < fromTs) return false;
-      if (filters.dateTo && !isNaN(toTs) && t > toTs) return false;
+      if (isFinite(fTs) && t < fTs) return false;
+      if (isFinite(tTs) && t > tTs) return false;
     }
     return true;
+  }
+
+  var dateAndCampFilteredRows = accountScopedRows.filter(function(r) {
+    return testDateAndCampMatch_(r, fromTs, toTs);
   });
+
+  var autoAdjustedRange = null;
+  if (dateAndCampFilteredRows.length === 0 && accountScopedRows.length > 0 && isFinite(minDateTs) && isFinite(maxDateTs) && (filters.isInitialLoad || filters.autoFallback !== false)) {
+    var fallbackFromTs = Math.max(minDateTs, maxDateTs - 6 * 86400000);
+    var fallbackFromStr = ymd(new Date(fallbackFromTs));
+    var fallbackToStr = maxDateStr || ymd(new Date(maxDateTs));
+    var fallbackRows = accountScopedRows.filter(function(r) {
+      return testDateAndCampMatch_(r, fallbackFromTs, maxDateTs + 86399999);
+    });
+    if (fallbackRows.length > 0) {
+      dateAndCampFilteredRows = fallbackRows;
+      autoAdjustedRange = { from: fallbackFromStr, to: fallbackToStr };
+    }
+  }
 
   // 3. Gom nhóm cấp Chiến dịch (Aggregate by Campaign)
   var campMap = {};
@@ -8269,7 +8302,14 @@ function filterCampaignsInMemory_(rawRes, filters) {
     allCampaignMeta: allCampaignMeta,
     generatedAt: rawRes.generatedAt || new Date().toLocaleString(),
     fromCache: true,
-    error: null
+    error: null,
+    totalRows: accountScopedRows.length,
+    accountScopedRowsCount: accountScopedRows.length,
+    availableMinDate: minDateStr,
+    availableMaxDate: maxDateStr,
+    availableMinTs: isFinite(minDateTs) ? minDateTs : null,
+    availableMaxTs: isFinite(maxDateTs) ? maxDateTs : null,
+    autoAdjustedRange: autoAdjustedRange
   };
 }
 
@@ -8284,8 +8324,8 @@ function filterAdSetsInMemory_(rawRes, filters) {
     ? filters.accountIds 
     : (selectedAccountIds && selectedAccountIds.length ? selectedAccountIds : []);
 
-  var rows = rawRows.filter(function(r) {
-    if (!targetAccounts.length) return true;
+  var accountScopedRows = rawRows.filter(function(r) {
+    if (!targetAccounts.length || targetAccounts.indexOf('ALL') !== -1) return true;
     var rowAcc = String(r.accountId || '').trim();
     if (rowAcc) {
       if (targetAccounts.indexOf(rowAcc) !== -1) return true;
@@ -8306,16 +8346,43 @@ function filterAdSetsInMemory_(rawRes, filters) {
     return false;
   });
 
-  if (filters.dateFrom || filters.dateTo) {
-    var fromTs = filters.dateFrom ? tsOf(filters.dateFrom) : -Infinity;
-    var toTs = filters.dateTo ? (tsOf(filters.dateTo) + 86399999) : Infinity;
-    rows = rows.filter(function(r) {
-      var t = r.reportingEndsTs || tsOf(r.reportingEnds);
-      if (isNaN(t)) return false;
-      if (filters.dateFrom && !isNaN(fromTs) && t < fromTs) return false;
-      if (filters.dateTo && !isNaN(toTs) && t > toTs) return false;
-      return true;
+  var minDateTs = Infinity, maxDateTs = -Infinity;
+  var minDateStr = '', maxDateStr = '';
+  accountScopedRows.forEach(function(r) {
+    var t = r.reportingEndsTs || tsOf(r.reportingEnds);
+    if (!isNaN(t) && isFinite(t)) {
+      if (t < minDateTs) { minDateTs = t; minDateStr = r.reportingEnds; }
+      if (t > maxDateTs) { maxDateTs = t; maxDateStr = r.reportingEnds; }
+    }
+  });
+
+  var fromTs = filters.dateFrom ? tsOf(filters.dateFrom) : -Infinity;
+  var toTs = filters.dateTo ? (tsOf(filters.dateTo) + 86399999) : Infinity;
+
+  function testAdSetDateMatch_(r, fTs, tTs) {
+    var t = r.reportingEndsTs || tsOf(r.reportingEnds);
+    if (isNaN(t)) return false;
+    if (isFinite(fTs) && t < fTs) return false;
+    if (isFinite(tTs) && t > tTs) return false;
+    return true;
+  }
+
+  var rows = accountScopedRows.filter(function(r) {
+    return testAdSetDateMatch_(r, fromTs, toTs);
+  });
+
+  var autoAdjustedRange = null;
+  if (rows.length === 0 && accountScopedRows.length > 0 && isFinite(minDateTs) && isFinite(maxDateTs) && (filters.isInitialLoad || filters.autoFallback !== false)) {
+    var fallbackFromTs = Math.max(minDateTs, maxDateTs - 6 * 86400000);
+    var fallbackFromStr = ymd(new Date(fallbackFromTs));
+    var fallbackToStr = maxDateStr || ymd(new Date(maxDateTs));
+    var fallbackRows = accountScopedRows.filter(function(r) {
+      return testAdSetDateMatch_(r, fallbackFromTs, maxDateTs + 86399999);
     });
+    if (fallbackRows.length > 0) {
+      rows = fallbackRows;
+      autoAdjustedRange = { from: fallbackFromStr, to: fallbackToStr };
+    }
   }
 
   var targetCampaigns = (Array.isArray(filters.campaignNames) && filters.campaignNames.length)
@@ -8393,7 +8460,14 @@ function filterAdSetsInMemory_(rawRes, filters) {
     adsetList: adsetList,
     summary: summary,
     fromCache: true,
-    error: null
+    error: null,
+    totalRows: accountScopedRows.length,
+    accountScopedRowsCount: accountScopedRows.length,
+    availableMinDate: minDateStr,
+    availableMaxDate: maxDateStr,
+    availableMinTs: isFinite(minDateTs) ? minDateTs : null,
+    availableMaxTs: isFinite(maxDateTs) ? maxDateTs : null,
+    autoAdjustedRange: autoAdjustedRange
   };
 }
 
@@ -8409,7 +8483,7 @@ function filterAdsInMemory_(rawRes, filters) {
     : (selectedAccountIds && selectedAccountIds.length ? selectedAccountIds : []);
 
   var filtered = rawAds.filter(function(a) {
-    if (targetAccounts.length) {
+    if (targetAccounts.length && targetAccounts.indexOf('ALL') === -1) {
       var acc = String(a.accId || a.accountId || '').trim();
       if (acc) {
         if (targetAccounts.indexOf(acc) === -1) {
@@ -9230,7 +9304,8 @@ function applyMultiPicker(id){
   }
 }
 
-function readFilters(){
+function readFilters(opts){
+  opts = opts || {};
   var accs = getSelectedAccountIds();
   var campNames = getMultiPickerValues('campPicker');
   return {
@@ -9241,7 +9316,9 @@ function readFilters(){
     dateFrom: currentRange.from || val('headerDateFrom') || val('filterDateFrom'),
     dateTo: currentRange.to || val('headerDateTo') || val('filterDateTo'),
     roasMin: val('filterRoasMin'),
-    objective: val('filterObjective')
+    objective: val('filterObjective'),
+    isInitialLoad: !!opts.isInitialLoad,
+    autoFallback: opts.autoFallback !== undefined ? !!opts.autoFallback : true
   };
 }
 
@@ -10266,10 +10343,19 @@ function onData(res){
   }
   CAMP = res; CAMP.demo = isDemo();
   if(!CAMP.summary) CAMP.summary = emptySummaryClient();
+  if(res.availableMaxTs && (isNaN(DATA_MAX_TS) || DATA_MAX_TS < res.availableMaxTs)){
+    DATA_MAX_TS = res.availableMaxTs;
+  }
   if(isNaN(DATA_MAX_TS) && CAMP.rows && CAMP.rows.length){
     var max = -Infinity;
     CAMP.rows.forEach(function(r){ if(r.reportingEndsTs && r.reportingEndsTs > max) max = r.reportingEndsTs; });
     if(max > -Infinity) DATA_MAX_TS = max;
+  }
+  if(res.autoAdjustedRange){
+    currentRange.from = res.autoAdjustedRange.from;
+    currentRange.to = res.autoAdjustedRange.to;
+    syncAllDateInputsFromRange_();
+    updateHeaderDateDisplay();
   }
   var demoPill = document.getElementById('demoPill');
   if(demoPill) demoPill.classList.toggle('show', !!CAMP.demo);
@@ -10363,8 +10449,27 @@ function renderBanners(){
   if(STATE.demo) html += banner('demo','flask','<b>Chế độ Demo Đa Tài Khoản:</b> Dữ liệu mô phỏng chân thực cho cả ' + DASHBOARD_ACCOUNTS.length + ' tài khoản quảng cáo. Khi deploy lên Google Apps Script sẽ tự động kết nối Sheet thật.');
   if(STATE.error) html += banner('error','circle-exclamation','<b>Không thể tải dữ liệu:</b> '+esc(STATE.error));
   if(STATE.missing && STATE.missing.length) html += banner('warn','triangle-exclamation','<b>Thiếu một số cột trong Sheet:</b> '+STATE.missing.map(esc).join(', ')+'. Các cột này sẽ hiển thị là 0.');
+  if(STATE.rows && STATE.rows.length === 0 && (STATE.totalRows > 0 || STATE.accountScopedRowsCount > 0) && STATE.availableMaxDate){
+    html += banner('warn','calendar-check','<b>Không có dữ liệu trong khoảng thời gian đã chọn:</b> Dữ liệu của các tài khoản đã chọn có từ <b>' + esc(STATE.availableMinDate) + '</b> đến <b>' + esc(STATE.availableMaxDate) + '</b>. <button type="button" class="btn btn-sm" style="margin-left:10px;padding:3px 10px;font-size:12px;background:var(--meta-blue);color:#fff;border:none;border-radius:4px;cursor:pointer;" onclick="switchToAvailableDates(\'' + esc(STATE.availableMinDate) + '\',\'' + esc(STATE.availableMaxDate) + '\')"><i class="fas fa-calendar-day"></i> Xem 7 ngày gần nhất có dữ liệu</button>');
+  }
   var bz = document.getElementById('bannerZone');
   if(bz) bz.innerHTML = html;
+}
+
+function switchToAvailableDates(minDate, maxDate) {
+  if (!maxDate) return;
+  var maxTs = tsOf(maxDate);
+  var minTs = tsOf(minDate);
+  var fromTs = Math.max(minTs, maxTs - 6 * 86400000);
+  currentRange.from = ymd(new Date(fromTs));
+  currentRange.to = maxDate;
+  currentRange.preset = 'custom';
+  tempRange.from = currentRange.from;
+  tempRange.to = currentRange.to;
+  tempRange.preset = 'custom';
+  syncAllDateInputsFromRange_();
+  updateHeaderDateDisplay();
+  refreshActive(false);
 }
 
 function banner(t,i,m){ return '<div class="banner '+t+'"><i class="fas fa-'+i+'"></i><div>'+m+'</div></div>'; }
