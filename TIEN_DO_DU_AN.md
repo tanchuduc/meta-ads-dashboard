@@ -1,7 +1,7 @@
 # BÁO CÁO TIẾN ĐỘ DỰ ÁN & BỐI CẢNH HIỆN TẠI (PROJECT STATUS)
 > **Dự án**: Meta Ads Dashboard (Hệ thống Báo cáo & Dashboard Tự động Meta Ads)  
-> **Cập nhật lần cuối**: 10/11/2026 (23:55 GMT+7) — Commit gần nhất: `0cb61dd` (`main`), kèm chỉnh sửa UI chưa commit tại `index.html` & `apps-script/Dashboard.html`  
-> **Deployment GAS hiện tại**: `@12` (`AKfycbwiUrrO-wOlSQ8V-_6curECLrd7-n339lcJLhAwK6AUfQwzvxWeDgNYj4Xaq765-9uZ`)  
+> **Cập nhật lần cuối**: 11/11/2026 (08:55 GMT+7) — Commit gần nhất: `54cd1ed` (`main`)  
+> **Deployment GAS hiện tại**: `@14` (`AKfycbwiUrrO-wOlSQ8V-_6curECLrd7-n339lcJLhAwK6AUfQwzvxWeDgNYj4Xaq765-9uZ`)  
 > **Mục đích tài liệu**: Tóm tắt toàn bộ bối cảnh, kiến trúc kỹ thuật, tiến độ đã hoàn thành, trạng thái cấu hình `clasp`/deploy và các bước tiếp theo để khi mở dự án trên bất kỳ máy nào (nhà hoặc công ty), AI Agent (Antigravity) và lập trình viên có thể nắm bắt và tiếp tục công việc ngay lập tức.
 
 ---
@@ -173,29 +173,46 @@ Tất cả cấu hình chính được khai báo trong [`apps-script/Config.gs`]
   - **Breakdown** (`BreakdownPipeline.gs`): `backfillBreakdownsCustomRange()`, `backfillLast30Days_Breakdowns()`, `backfillLast90Days_Breakdowns()` tích hợp `runAsyncBackfillJob_()`.
   - Các hàm dọn dữ liệu (`removeRowsInDateRange_`, `removeAdSetRowsInRange_`, `removeBreakdownRowsInRange_`) hỗ trợ tham số `accountIdSet` và so sánh ngày ISO để chỉ ghi đè đúng tài khoản đã kéo thành công.
 
-### F. Bộ Lọc Đa Chọn Có Tìm Kiếm & Đồng Bộ File (Chưa Commit / Chưa Deploy sau 23:49)
+### F. Bộ Lọc Đa Chọn Có Tìm Kiếm (MULTI_PICKERS) & Đồng Bộ Frontend (`a477d06`)
 - [x] **Backend hỗ trợ lọc đa chiến dịch (`0cb61dd`, `Code.gs`)**:
   - `getDashboardData()` hỗ trợ `filters.campaignNames` (mảng nhiều tên chiến dịch) và trả về `allCampaignMeta` (`{ name, accountName }`).
-- [x] **Frontend Searchable Multi-Select Filter Pickers (`MULTI_PICKERS`, chưa commit)**:
+- [x] **Frontend Searchable Multi-Select Filter Pickers (`MULTI_PICKERS`, `a477d06`)**:
   - Thay thế các ô tìm kiếm/dropdown đơn lẻ bằng bộ chọn đa mục kèm tìm kiếm không dấu tiếng Việt (`foldVi_`), chọn tất cả, xóa chọn, Enter chọn khớp:
     - Tab Chiến dịch: `#campPickerGroup`
     - Tab Nhóm QC: `#adsetCampaignFilterGroup`, `#adsetNamePickerGroup`
     - Tab Mẫu QC: `#adsCampPickerGroup`, `#adsAdSetPickerGroup`, `#adsNamePickerGroup`
     - Tab Report Builder: `#reportCampPickerGroup`
 - [x] **Kiểm tra đồng bộ Frontend**:
-  - `index.html` và `apps-script/Dashboard.html` hiện **giống nhau 100%** (SHA-256: `2BFEC74148B5D4D44065D8E29A112BFFB3B3009281BEE4266BC27707C68AD213`).
+  - `index.html` và `apps-script/Dashboard.html` được đồng bộ hoàn toàn.
+
+### G. Khắc Phục Lỗi Lệch Múi Giờ Ngày & Đồng Bộ Bộ Lọc Tài Khoản Toàn Diện (`54cd1ed`, Deploy `@14`)
+- [x] **Xử lý triệt để múi giờ ngày (Timezone & Date Bounds) trên Backend ([`apps-script/Code.gs`](apps-script/Code.gs))**:
+  - Thay thế việc so sánh `new Date()` dễ lệch múi giờ UTC/GMT+7 bằng `buildDateRangeBounds_()` và `isDateInBounds_()`, tính chuẩn xác theo miligiây timestamp (`tsOf` kèm offset cuối ngày `+86399999ms`).
+  - Áp dụng kiểm tra biên ngày nhất quán cho toàn bộ các hàm đọc: `getDashboardData()`, `getReportCampaigns()`, `getBreakdownData()`, `getAdSetBreakdownData()`.
+- [x] **Chuẩn hóa ID tài khoản & cơ chế đối chiếu Account ([`apps-script/Code.gs`](apps-script/Code.gs))**:
+  - Thêm `normalizeSingleAccountId_()` tự động chuẩn hóa ID tài khoản (hỗ trợ cả định dạng `act_...` lẫn chuỗi số thuần).
+  - Nâng cấp `rowMatchesAccounts_()` so sánh đa dạng (id chuẩn hóa, ID không tiền tố, và fallback theo cả `fullName` lẫn `shortName` của `AD_ACCOUNTS`).
+  - Tái cấu trúc `buildCampaignAccountMap_()`: lưu mảng tài khoản (`map[cname] = [{ accountId, accountName }]`) để xử lý các chiến dịch có tên trùng lặp ở nhiều tài khoản khác nhau trong lịch sử.
+  - Sửa `getAdSetData()`: gộp key phân nhóm `_groupKey` có gắn kèm thông tin tài khoản để tránh xung đột dữ liệu giữa các nhóm quảng cáo cùng tên ở các tài khoản khác nhau; hỗ trợ thêm bộ lọc `targetAdSets`.
+- [x] **Đồng bộ hóa Trạng thái Bộ Lọc & Cache trên Frontend ([`apps-script/Dashboard.html`](apps-script/Dashboard.html) & [`index.html`](index.html))**:
+  - Bổ sung `lastLoadedFilterKey_` lưu vết bộ lọc từng tab (`campaign`, `adset`, `ads`, `breakdown`), ngăn chặn gọi API trùng lặp khi người dùng chuyển qua lại các tab.
+  - Thêm `clearDependentPickersOnAccountChange_()`: tự động xóa sạch các lựa chọn cũ ở picker Chiến dịch, Nhóm QC, Mẫu QC khi người dùng thay đổi chọn Ad Account, tránh tình trạng hiển thị data sai lệch chéo tài khoản.
+  - Thêm `syncAllDateInputsFromRange_()`: đồng bộ 2 chiều toàn diện giữa bộ chọn ngày toàn cục trên Header và các ô chọn ngày con trong tab Report/Breakdown.
+  - Nâng cấp cơ chế Demo Offline: thêm `demoDateScaleFactor_()` và `demoAccountShareFactor_()` để dữ liệu giả lập tự động scale tỷ lệ tương ứng theo khoảng ngày và số tài khoản được chọn.
+- [x] **Triển khai Apps Script**:
+  - Đã push và deploy thành công lên Google Apps Script Web App phiên bản **`@14`** với mô tả *"Fix date and account filter synchronization"*.
 
 ---
 
 ## 5. CÁC BƯỚC TRIỂN KHAI & VẬN HÀNH TIẾP THEO (NEXT STEPS)
 
-### Bước 1: Commit Git & Deploy bản UI `MULTI_PICKERS` lên GAS
-Hiện tại `index.html` và `apps-script/Dashboard.html` đang có chỉnh sửa mới (lúc 23:49) chưa commit và chưa push lên deployment `@12`. Chạy tuần tự trên PowerShell (dùng `npm.cmd`):
+### Bước 1: Deploy & Đồng bộ Code lên GAS (Đã hoàn thành deploy `@14`)
+Đã đồng bộ `index.html` sang `apps-script/Dashboard.html` và deploy lên GAS version `@14` (`AKfycbwiUrrO-wOlSQ8V-_6curECLrd7-n339lcJLhAwK6AUfQwzvxWeDgNYj4Xaq765-9uZ`).  
+Khi có chỉnh sửa code tiếp theo, chạy:
 ```powershell
 npm.cmd run sync
 npm.cmd run deployments
 ```
-Sau đó kiểm tra `git status` và commit các file thay đổi lên Git.
 
 ### Bước 2: Thiết lập Auth & Google Sign-In (Nếu chưa cấu hình lần đầu)
 1. Mở Apps Script Editor (Project ID: `1luxN_OzfyFCdWtUlc-ZcUm3sLqBO6dRo8sji30a_6cyHE5CsNf7h5h5k`), chọn file `Auth.gs` và chạy 1 lần hàm `setupAuthPasswords('mat_khau_super_admin', 'mat_khau_alpha')` (hoặc tạo Script Property `INITIAL_ALPHA_PASSWORD`).
@@ -221,10 +238,10 @@ Trong mục **Triggers** của Apps Script, đảm bảo có các trigger hàng 
 - `importBreakdownData` (5:00–6:00 AM — nếu sử dụng Report Builder)
 
 ### Bước 5: Việc cần kiểm nghiệm & cải thiện tiếp (Pending Items)
-- [ ] Push bản UI `MULTI_PICKERS` mới nhất lên Google Apps Script (`npm.cmd run sync`) và commit git các thay đổi đang chờ (`index.html`, `apps-script/Dashboard.html`, `TIEN_DO_DU_AN.md`).
+- [x] Push bản UI `MULTI_PICKERS` và bản sửa lỗi Date/Account synchronization lên Google Apps Script (đã deploy `@14`).
 - [ ] Kiểm thử thực tế các luồng trên GAS Web App:
   - Đăng nhập RBAC (Super Admin thấy 9/9 TK & tab Quản Trị User; user `alpha` chỉ thấy 4 TK được cấp).
-  - Bộ lọc `MULTI_PICKERS` đa chọn trên cả 4 tab (Chiến dịch, Nhóm QC, Mẫu QC, Report Builder).
+  - Bộ lọc `MULTI_PICKERS` đa chọn trên cả 4 tab (Chiến dịch, Nhóm QC, Mẫu QC, Report Builder) khi chọn/bỏ chọn Ad Account.
   - Chạy thử 1 lệnh Async Backfill (`backfillLast30Days()` hoặc `backfillAdSetData()`) để xác nhận trigger `continueAsyncBackfillJob` tự nối ca và tự dọn sau khi hoàn tất.
 - [ ] Kiểm tra log chạy thực tế cho tài khoản thứ 9 (`act_1845118092714419`) và `fetchAdsFastPathBatch_()` (`UrlFetchApp.fetchAll`).
 - [ ] Rà soát bảo mật `ACCESS_TOKEN` trong `apps-script/Config.gs` (xem mục 7).
