@@ -652,6 +652,14 @@ function recomputeResultsHistory_AdLevel() {
 function getAdSheet_() {
   var ss = getAdSpreadsheet_();
   var sh = ss.getSheetByName('data - ad - by day');
+  if (sh && sh.getLastRow() >= 2) return sh;
+  var testSh = ss.getSheetByName('test-ad');
+  if (testSh && testSh.getLastRow() >= 2) return testSh;
+  var allSheets = ss.getSheets();
+  for (var i = 0; i < allSheets.length; i++) {
+    var s = allSheets[i];
+    if (s.getLastRow() >= 2) return s;
+  }
   if (!sh) sh = ss.insertSheet('data - ad - by day');
   return sh;
 }

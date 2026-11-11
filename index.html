@@ -5460,6 +5460,7 @@ thead th.col-campaignName {
   <div class="section-bar">
     <h2><i class="fas fa-users-gear" aria-hidden="true"></i> Quản Trị Người Dùng &amp; Phân Quyền TKQC</h2>
     <div class="section-actions" style="display:flex;align-items:center;gap:8px">
+      <button type="button" class="ghost-btn" id="btnAdminRunSyncNow" onclick="adminTriggerImmediateSync()"><i class="fas fa-bolt" style="color:#F59E0B" aria-hidden="true"></i> Đồng bộ Meta Ads Ngay</button>
       <button type="button" class="ghost-btn" id="btnAdminSetupTriggers" onclick="adminTriggerDailySetup()"><i class="fas fa-clock" aria-hidden="true"></i> Cài đặt 5 Trigger Tự Động Ban Đêm</button>
       <button type="button" class="ghost-btn" onclick="loadAdminUsers()"><i class="fas fa-rotate" aria-hidden="true"></i> Tải lại danh sách</button>
     </div>
@@ -5836,17 +5837,36 @@ var MetaAdsDB = (function() {
         resolve(null);
         return;
       }
+      var timer = setTimeout(function() {
+        resolve(null);
+      }, 150);
       try {
         var req = indexedDB.open(DB_NAME, DB_VERSION);
         req.onupgradeneeded = function(e) {
-          var db = e.target.result;
-          if (!db.objectStoreNames.contains(STORE_NAME)) {
-            db.createObjectStore(STORE_NAME);
+          try {
+            var db = e.target.result;
+            if (!db.objectStoreNames.contains(STORE_NAME)) {
+              db.createObjectStore(STORE_NAME);
+            }
+          } catch(err) {
+            clearTimeout(timer);
+            resolve(null);
           }
         };
-        req.onsuccess = function(e) { resolve(e.target.result); };
-        req.onerror = function() { resolve(null); };
+        req.onsuccess = function(e) {
+          clearTimeout(timer);
+          resolve(e.target.result);
+        };
+        req.onerror = function() {
+          clearTimeout(timer);
+          resolve(null);
+        };
+        req.onblocked = function() {
+          clearTimeout(timer);
+          resolve(null);
+        };
       } catch (err) {
+        clearTimeout(timer);
         resolve(null);
       }
     });
@@ -5855,48 +5875,74 @@ var MetaAdsDB = (function() {
 
   return {
     get: function(key) {
-      return openDB_().then(function(db) {
-        if (!db) {
-          try {
-            var raw = localStorage.getItem('metaads_' + key);
-            return raw ? JSON.parse(raw) : null;
-          } catch(e) { return null; }
-        }
-        return new Promise(function(resolve) {
+      return new Promise(function(outerResolve) {
+        var outerTimer = setTimeout(function() {
+          outerResolve(null);
+        }, 180);
+
+        openDB_().then(function(db) {
+          if (!db) {
+            clearTimeout(outerTimer);
+            try {
+              var raw = localStorage.getItem('metaads_' + key);
+              outerResolve(raw ? JSON.parse(raw) : null);
+            } catch(e) { outerResolve(null); }
+            return;
+          }
           try {
             var tx = db.transaction(STORE_NAME, 'readonly');
             var store = tx.objectStore(STORE_NAME);
             var req = store.get(key);
-            req.onsuccess = function() { resolve(req.result || null); };
-            req.onerror = function() { resolve(null); };
-          } catch(e) { resolve(null); }
+            req.onsuccess = function() {
+              clearTimeout(outerTimer);
+              outerResolve(req.result || null);
+            };
+            req.onerror = function() {
+              clearTimeout(outerTimer);
+              outerResolve(null);
+            };
+            tx.onabort = function() {
+              clearTimeout(outerTimer);
+              outerResolve(null);
+            };
+          } catch(e) {
+            clearTimeout(outerTimer);
+            outerResolve(null);
+          }
+        }).catch(function() {
+          clearTimeout(outerTimer);
+          outerResolve(null);
         });
       });
     },
     set: function(key, val) {
-      return openDB_().then(function(db) {
-        if (!db) {
-          try { localStorage.setItem('metaads_' + key, JSON.stringify(val)); } catch(e){}
-          return true;
-        }
-        return new Promise(function(resolve) {
-          try {
-            var tx = db.transaction(STORE_NAME, 'readwrite');
-            var store = tx.objectStore(STORE_NAME);
-            store.put(val, key);
-            tx.oncomplete = function() { resolve(true); };
-            tx.onerror = function() { resolve(false); };
-          } catch(e) { resolve(false); }
-        });
+      return new Promise(function(resolve) {
+        var timer = setTimeout(function() { resolve(false); }, 300);
+        try {
+          openDB_().then(function(db) {
+            if (!db) {
+              clearTimeout(timer);
+              try { localStorage.setItem('metaads_' + key, JSON.stringify(val)); } catch(e){}
+              resolve(true);
+              return;
+            }
+            try {
+              var tx = db.transaction(STORE_NAME, 'readwrite');
+              var store = tx.objectStore(STORE_NAME);
+              store.put(val, key);
+              tx.oncomplete = function() { clearTimeout(timer); resolve(true); };
+              tx.onerror = function() { clearTimeout(timer); resolve(false); };
+              tx.onabort = function() { clearTimeout(timer); resolve(false); };
+            } catch(e) { clearTimeout(timer); resolve(false); }
+          }).catch(function() { clearTimeout(timer); resolve(false); });
+        } catch(e) { clearTimeout(timer); resolve(false); }
       });
     },
     remove: function(key) {
-      return openDB_().then(function(db) {
-        if (!db) {
-          try { localStorage.removeItem('metaads_' + key); } catch(e){}
-          return true;
-        }
-        return new Promise(function(resolve) {
+      return new Promise(function(resolve) {
+        try { localStorage.removeItem('metaads_' + key); } catch(e){}
+        openDB_().then(function(db) {
+          if (!db) { resolve(true); return; }
           try {
             var tx = db.transaction(STORE_NAME, 'readwrite');
             var store = tx.objectStore(STORE_NAME);
@@ -5904,29 +5950,23 @@ var MetaAdsDB = (function() {
             tx.oncomplete = function() { resolve(true); };
             tx.onerror = function() { resolve(false); };
           } catch(e) { resolve(false); }
-        });
+        }).catch(function() { resolve(false); });
       });
     },
     clear: function() {
-      return openDB_().then(function(db) {
-        if (!db) {
-          try {
-            for (var k in localStorage) {
-              if (k.indexOf('metaads_') === 0) localStorage.removeItem(k);
-            }
-          } catch(e){}
-          return true;
-        }
-        return new Promise(function(resolve) {
+      try {
+        ['camp_raw_v1','adset_raw_v1','ads_raw_v1'].forEach(function(k){
+          try { localStorage.removeItem('metaads_' + k); } catch(e){}
+        });
+        openDB_().then(function(db) {
+          if (!db) return;
           try {
             var tx = db.transaction(STORE_NAME, 'readwrite');
             var store = tx.objectStore(STORE_NAME);
             store.clear();
-            tx.oncomplete = function() { resolve(true); };
-            tx.onerror = function() { resolve(false); };
-          } catch(e) { resolve(false); }
-        });
-      });
+          } catch(e){}
+        }).catch(function(){});
+      } catch(e){}
     }
   };
 })();
@@ -8165,16 +8205,21 @@ function filterCampaignsInMemory_(rawRes, filters) {
   });
 
   var autoAdjustedRange = null;
-  if (dateAndCampFilteredRows.length === 0 && accountScopedRows.length > 0 && isFinite(minDateTs) && isFinite(maxDateTs) && (filters.isInitialLoad || filters.autoFallback !== false)) {
+  if (dateAndCampFilteredRows.length === 0 && accountScopedRows.length > 0 && isFinite(minDateTs) && isFinite(maxDateTs)) {
     var fallbackFromTs = Math.max(minDateTs, maxDateTs - 6 * 86400000);
-    var fallbackFromStr = ymd(new Date(fallbackFromTs));
-    var fallbackToStr = maxDateStr || ymd(new Date(maxDateTs));
+    var dF = new Date(fallbackFromTs);
+    var fallbackFromStr = dF.getUTCFullYear() + '-' + ('0' + (dF.getUTCMonth() + 1)).slice(-2) + '-' + ('0' + dF.getUTCDate()).slice(-2);
+    var fallbackToStr = maxDateStr;
+    if (!fallbackToStr) {
+      var dT = new Date(maxDateTs);
+      fallbackToStr = dT.getUTCFullYear() + '-' + ('0' + (dT.getUTCMonth() + 1)).slice(-2) + '-' + ('0' + dT.getUTCDate()).slice(-2);
+    }
     var fallbackRows = accountScopedRows.filter(function(r) {
       return testDateAndCampMatch_(r, fallbackFromTs, maxDateTs + 86399999);
     });
     if (fallbackRows.length > 0) {
       dateAndCampFilteredRows = fallbackRows;
-      autoAdjustedRange = { from: fallbackFromStr, to: fallbackToStr };
+      autoAdjustedRange = { from: fallbackFromStr, to: fallbackToStr, preset: 'custom' };
     }
   }
 
@@ -9844,7 +9889,24 @@ function loadAdSetData(forceServer){
       return;
     }
     showLoading();
+    var dispatchedServer = false;
+    var fallbackTimer = setTimeout(function() {
+      if (!dispatchedServer && !RAW_DATA.adset) {
+        dispatchedServer = true;
+        syncAdSetDatasetFromServer_(false);
+      }
+    }, 150);
+
     MetaAdsDB.get('adset_raw_v1').then(function(cached) {
+      if (dispatchedServer) {
+        if (cached && cached.rows && cached.rows.length && !RAW_DATA.adset) {
+          RAW_DATA.adset = cached;
+          onAdSetData(filterAdSetsInMemory_(RAW_DATA.adset, filters));
+        }
+        return;
+      }
+      clearTimeout(fallbackTimer);
+      dispatchedServer = true;
       if (cached && cached.rows && cached.rows.length) {
         RAW_DATA.adset = cached;
         var instant = filterAdSetsInMemory_(RAW_DATA.adset, filters);
@@ -9854,6 +9916,12 @@ function loadAdSetData(forceServer){
           syncAdSetDatasetFromServer_(false);
         }
       } else {
+        syncAdSetDatasetFromServer_(false);
+      }
+    }).catch(function() {
+      if (!dispatchedServer) {
+        dispatchedServer = true;
+        clearTimeout(fallbackTimer);
         syncAdSetDatasetFromServer_(false);
       }
     });
@@ -10115,7 +10183,24 @@ function loadAdsData(forceServer){
       return;
     }
     showFilterStatus_('adsFilterStatus', 'Đang nạp Mẫu QC…');
+    var dispatchedServer = false;
+    var fallbackTimer = setTimeout(function() {
+      if (!dispatchedServer && !RAW_DATA.ads) {
+        dispatchedServer = true;
+        syncAdsDatasetFromServer_(false);
+      }
+    }, 150);
+
     MetaAdsDB.get('ads_raw_v1').then(function(cached) {
+      if (dispatchedServer) {
+        if (cached && cached.ads && cached.ads.length && !RAW_DATA.ads) {
+          RAW_DATA.ads = cached;
+          onAdsData(filterAdsInMemory_(RAW_DATA.ads, filters));
+        }
+        return;
+      }
+      clearTimeout(fallbackTimer);
+      dispatchedServer = true;
       if (cached && cached.ads && cached.ads.length) {
         RAW_DATA.ads = cached;
         var instant = filterAdsInMemory_(RAW_DATA.ads, filters);
@@ -10125,6 +10210,12 @@ function loadAdsData(forceServer){
           syncAdsDatasetFromServer_(false);
         }
       } else {
+        syncAdsDatasetFromServer_(false);
+      }
+    }).catch(function() {
+      if (!dispatchedServer) {
+        dispatchedServer = true;
+        clearTimeout(fallbackTimer);
         syncAdsDatasetFromServer_(false);
       }
     });
@@ -10255,7 +10346,7 @@ function loadData(filters, forceServer){
     return;
   }
 
-  // 2. Nếu chưa có trong RAM, thử đọc từ IndexedDB trong tích tắc (< 50ms)
+  // 2. Nếu chưa có trong RAM, đọc từ cache với timeout 150ms để không bao giờ bị nghẽn UI
   if (!forceServer && !RAW_DATA.campaign) {
     if (isDemo()) {
       var dRes = DEMO_DATA({});
@@ -10265,7 +10356,26 @@ function loadData(filters, forceServer){
       return;
     }
     showLoading();
+    var dispatchedServer = false;
+    var fallbackTimer = setTimeout(function() {
+      if (!dispatchedServer && !RAW_DATA.campaign) {
+        dispatchedServer = true;
+        syncCampaignDatasetFromServer_(false);
+      }
+    }, 150);
+
     MetaAdsDB.get('camp_raw_v1').then(function(cached) {
+      if (dispatchedServer) {
+        if (cached && cached.rows && cached.rows.length && !RAW_DATA.campaign) {
+          RAW_DATA.campaign = cached;
+          var instant = filterCampaignsInMemory_(RAW_DATA.campaign, filters);
+          onData(instant);
+          updateCacheStatusBadge_('IndexedDB (' + (cached.cachedAtStr || 'Vừa xong') + ')', 'cached');
+        }
+        return;
+      }
+      clearTimeout(fallbackTimer);
+      dispatchedServer = true;
       if (cached && cached.rows && cached.rows.length) {
         RAW_DATA.campaign = cached;
         var instant = filterCampaignsInMemory_(RAW_DATA.campaign, filters);
@@ -10276,6 +10386,12 @@ function loadData(filters, forceServer){
           syncCampaignDatasetFromServer_(false);
         }
       } else {
+        syncCampaignDatasetFromServer_(false);
+      }
+    }).catch(function() {
+      if (!dispatchedServer) {
+        dispatchedServer = true;
+        clearTimeout(fallbackTimer);
         syncCampaignDatasetFromServer_(false);
       }
     });
@@ -10354,6 +10470,10 @@ function onData(res){
   if(res.autoAdjustedRange){
     currentRange.from = res.autoAdjustedRange.from;
     currentRange.to = res.autoAdjustedRange.to;
+    currentRange.preset = res.autoAdjustedRange.preset || 'custom';
+    tempRange.from = currentRange.from;
+    tempRange.to = currentRange.to;
+    tempRange.preset = currentRange.preset;
     syncAllDateInputsFromRange_();
     updateHeaderDateDisplay();
   }
@@ -10452,8 +10572,30 @@ function renderBanners(){
   if(STATE.rows && STATE.rows.length === 0 && (STATE.totalRows > 0 || STATE.accountScopedRowsCount > 0) && STATE.availableMaxDate){
     html += banner('warn','calendar-check','<b>Không có dữ liệu trong khoảng thời gian đã chọn:</b> Dữ liệu của các tài khoản đã chọn có từ <b>' + esc(STATE.availableMinDate) + '</b> đến <b>' + esc(STATE.availableMaxDate) + '</b>. <button type="button" class="btn btn-sm" style="margin-left:10px;padding:3px 10px;font-size:12px;background:var(--meta-blue);color:#fff;border:none;border-radius:4px;cursor:pointer;" onclick="switchToAvailableDates(\'' + esc(STATE.availableMinDate) + '\',\'' + esc(STATE.availableMaxDate) + '\')"><i class="fas fa-calendar-day"></i> Xem 7 ngày gần nhất có dữ liệu</button>');
   }
+  if((!STATE.rows || STATE.rows.length === 0) && (!STATE.totalRows || STATE.totalRows === 0) && !STATE.demo && !STATE.isArchive){
+    html += banner('warn','cloud-arrow-down','<b>Chưa có dữ liệu Meta Ads trong Google Sheets:</b> Bạn có thể bấm nút bên dưới để hệ thống kéo ngay dữ liệu từ Meta Ads API về bảng tính. <button type="button" class="btn btn-sm btn-primary" style="margin-left:12px;padding:4px 12px;font-size:12px;background:var(--meta-blue);color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:600;" onclick="adminTriggerImmediateSync()"><i class="fas fa-bolt"></i> Đồng Bộ Meta Ads Ngay</button>');
+  }
   var bz = document.getElementById('bannerZone');
   if(bz) bz.innerHTML = html;
+}
+
+function adminTriggerImmediateSync(){
+  if(!isAuthenticated_()) return;
+  var token = getSessionToken_();
+  showToast('Đang kết nối Meta Ads API và kéo dữ liệu... Quá trình có thể mất 15-30 giây.');
+  updateCacheStatusBadge_('Đang kéo từ Meta Ads…', 'syncing');
+  gasRun_('adminRunSyncNow', [token], function(res){
+    if(res && res.ok){
+      showToast(res.message || 'Đồng bộ từ Meta Ads thành công! Đang làm mới giao diện...');
+      refreshActive(true);
+    } else {
+      showToast('Lỗi đồng bộ: ' + ((res && res.error) || 'Không xác định'));
+      updateCacheStatusBadge_('Lỗi đồng bộ', 'cached');
+    }
+  }, function(err){
+    showToast('Lỗi kết nối máy chủ: ' + ((err && err.message) || String(err)));
+    updateCacheStatusBadge_('Lỗi', 'cached');
+  });
 }
 
 function switchToAvailableDates(minDate, maxDate) {

@@ -1099,3 +1099,26 @@ function adminGetAutoTriggersStatus(sessionToken) {
   return res;
 }
 
+/**
+ * Super Admin API: Kích hoạt đồng bộ dữ liệu cốt lõi (Campaign, AdSet, Ad) từ Meta Ads ngay lập tức
+ */
+function adminRunSyncNow(sessionToken) {
+  var auth = requireSuperAdmin_(sessionToken);
+  if (!auth.ok) {
+    return { ok: false, authError: !!auth.authError, forbidden: !!auth.forbidden, error: auth.error };
+  }
+  try {
+    if (typeof syncDataCore === 'function') {
+      syncDataCore();
+      return { ok: true, message: 'Đã hoàn tất đồng bộ cốt lõi (Campaign, AdSet, Ad) từ Meta Ads về Google Sheets!' };
+    }
+    if (typeof importDataFromJSON === 'function') {
+      importDataFromJSON();
+      return { ok: true, message: 'Đã hoàn tất đồng bộ Campaign từ Meta Ads về Google Sheets!' };
+    }
+    return { ok: false, error: 'Không tìm thấy hàm đồng bộ Meta Ads trong hệ thống.' };
+  } catch (err) {
+    return { ok: false, error: 'Lỗi khi đồng bộ từ Meta Ads: ' + (err.message || String(err)) };
+  }
+}
+

@@ -1142,17 +1142,65 @@ function getCampaignSpreadsheet_() {
 }
 
 function getSheet_() {
-  var id = (typeof getCampaignSheetId_ === 'function' ? getCampaignSheetId_() : null) || SHEET_ID;
+  var id = (typeof getCampaignSheetId_ === 'function' ? getCampaignSheetId_() : null) ||
+           (typeof PropertiesService !== 'undefined' ? PropertiesService.getScriptProperties().getProperty('CAMPAIGN_SHEET_ID') : null) ||
+           (typeof SHEET_ID !== 'undefined' ? SHEET_ID : null);
   var ss;
   if (id && id !== 'YOUR_SPREADSHEET_ID' && id !== '[SHEET_ID]') {
-    ss = SpreadsheetApp.openById(id);
-  } else {
-    ss = SpreadsheetApp.getActiveSpreadsheet();
+    try {
+      ss = SpreadsheetApp.openById(id);
+    } catch (e) {
+      Logger.log('getSheet_: Không thể mở Spreadsheet theo ID ' + id + ': ' + e.message);
+    }
   }
   if (!ss) {
-    throw new Error('Chưa kết nối Google Sheet. Hãy chạy hàm initSetupGoogleSheets() trong file Config.gs trước.');
+    try {
+      ss = SpreadsheetApp.getActiveSpreadsheet();
+    } catch (e) {}
   }
+  if (!ss) {
+    throw new Error('Chưa kết nối Campaign Google Sheet. Hãy chạy hàm initSetupGoogleSheets() trong file Config.gs trước.');
+  }
+
+  // 1. Ưu tiên tab chính thức "data - by day" nếu có dữ liệu
   var sheet = ss.getSheetByName(SHEET_NAME);
+  if (sheet && sheet.getLastRow() >= 2) {
+    return sheet;
+  }
+
+  // 2. Nếu "data - by day" rỗng hoặc chưa có, kiểm tra tab "test-fb"
+  var testSheet = ss.getSheetByName('test-fb');
+  if (testSheet && testSheet.getLastRow() >= 2) {
+    Logger.log('getSheet_: "data - by day" rỗng, tự động lấy dữ liệu từ tab "test-fb" (' + testSheet.getLastRow() + ' dòng)');
+    // Thử kích hoạt copyDataOnceADay để tự sao chép sang "data - by day"
+    try {
+      if (typeof copyDataOnceADay === 'function') {
+        copyDataOnceADay();
+        var refreshedSheet = ss.getSheetByName(SHEET_NAME);
+        if (refreshedSheet && refreshedSheet.getLastRow() >= 2) return refreshedSheet;
+      }
+    } catch (e) {
+      Logger.log('copyDataOnceADay auto-sync: ' + e.message);
+    }
+    return testSheet;
+  }
+
+  // 3. Quét tất cả các sheet trong workbook tìm sheet có dữ liệu campaign / spent
+  var allSheets = ss.getSheets();
+  for (var i = 0; i < allSheets.length; i++) {
+    var s = allSheets[i];
+    if (s.getLastRow() >= 2) {
+      try {
+        var headerRow = s.getRange(1, 1, 1, Math.min(s.getLastColumn(), 25)).getValues()[0].join(' ').toLowerCase();
+        if (headerRow.indexOf('campaign') !== -1 || headerRow.indexOf('spent') !== -1 || headerRow.indexOf('chi tiêu') !== -1) {
+          Logger.log('getSheet_: Tự động sử dụng sheet "' + s.getName() + '" (' + s.getLastRow() + ' dòng)');
+          return s;
+        }
+      } catch (err) {}
+    }
+  }
+
+  // 4. Nếu chưa có sheet nào có dữ liệu, tạo hoặc trả về SHEET_NAME
   if (!sheet) {
     sheet = ss.insertSheet(SHEET_NAME);
   }
