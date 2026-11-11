@@ -635,10 +635,10 @@ function recomputeCtrLinkOnly_CampaignLevel(sinceStr, untilStr) {
   var ctrLinkVals = all.map(function (r) { return [r[CTR_LINK_COL_CAMPAIGN_ - 1]]; });
   var rowIndexByKey = {};
   all.forEach(function (r, i) {
-    var dk = dayKey_(r[4]); // col 5 = Reporting ends
+    var dk = dayKey_(r[6]); // col 7 = Reporting ends (Account ID, Account Name, Campaign name, Objective, Attribution, Bid strategy, Reporting ends)
     var ts = new Date(dk).getTime();
     if (isNaN(ts) || ts < sinceTs || ts > untilTs) return;
-    rowIndexByKey[String(r[0]).trim() + '||' + dk] = i;
+    rowIndexByKey[String(r[0]).trim() + '||' + String(r[2]).trim() + '||' + dk] = i;
   });
 
   var params = {
@@ -710,10 +710,10 @@ function recomputeResultsOnly_CampaignLevel(sinceStr, untilStr) {
   var resultsVals = all.map(function (r) { return [r[RESULTS_COL_CAMPAIGN_ - 1]]; });
   var rowIndexByKey = {};
   all.forEach(function (r, i) {
-    var dk = dayKey_(r[4]); // col 5 = Reporting ends
+    var dk = dayKey_(r[6]); // col 7 = Reporting ends
     var ts = new Date(dk).getTime();
     if (isNaN(ts) || ts < sinceTs || ts > untilTs) return;
-    rowIndexByKey[String(r[0]).trim() + '||' + dk] = i;
+    rowIndexByKey[String(r[0]).trim() + '||' + String(r[2]).trim() + '||' + dk] = i;
   });
 
   var params = {

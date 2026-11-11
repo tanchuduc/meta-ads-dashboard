@@ -352,6 +352,35 @@ select:focus-visible {
   transform: translateY(0);
 }
 
+.cache-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  user-select: none;
+  transition: var(--transition);
+}
+.cache-status-pill i {
+  font-size: 11px;
+}
+.cache-status-pill.cached {
+  border-color: rgba(16, 185, 129, 0.3);
+  background: rgba(16, 185, 129, 0.08);
+  color: #059669;
+}
+.cache-status-pill.syncing {
+  border-color: rgba(8, 102, 255, 0.3);
+  background: rgba(8, 102, 255, 0.08);
+  color: var(--meta-blue);
+}
+
 /* -------------------------------------------------------------------------- */
 /* 4. MULTI-ACCOUNT SELECTOR POPOVER                                          */
 /* -------------------------------------------------------------------------- */
@@ -4910,7 +4939,8 @@ thead th.col-campaignName {
 
     <button type="button" class="utility-pill-btn icon-only" id="sopToggleBtn" onclick="toggleSOP(event)" title="Hướng Dẫn SOP" aria-label="Hướng Dẫn SOP"><i class="fas fa-book" aria-hidden="true"></i></button>
     <span id="timeDisplay" style="display:none">&mdash;</span>
-    <button type="button" class="refresh-btn" onclick="refreshActive()"><i class="fas fa-sync-alt" aria-hidden="true"></i> Làm mới</button>
+    <span class="cache-status-pill cached" id="cacheStatusPill" title="Dữ liệu nạp tức thì từ bộ nhớ đệm (IndexedDB/RAM)"><i class="fas fa-bolt" style="color:#F59E0B"></i> <span id="cacheStatusText">0.01s (RAM)</span></span>
+    <button type="button" class="refresh-btn" id="headerRefreshBtn" onclick="refreshActive(true)"><i class="fas fa-sync-alt" aria-hidden="true"></i> Làm mới</button>
 
     <!-- User Profile Pill -->
     <div class="user-profile-pill" id="userProfilePill" style="display:none">
@@ -5414,6 +5444,7 @@ thead th.col-campaignName {
   <div class="section-bar">
     <h2><i class="fas fa-users-gear" aria-hidden="true"></i> Quản Trị Người Dùng &amp; Phân Quyền TKQC</h2>
     <div class="section-actions" style="display:flex;align-items:center;gap:8px">
+      <button type="button" class="ghost-btn" id="btnAdminSetupTriggers" onclick="adminTriggerDailySetup()"><i class="fas fa-clock" aria-hidden="true"></i> Cài đặt 5 Trigger Tự Động Ban Đêm</button>
       <button type="button" class="ghost-btn" onclick="loadAdminUsers()"><i class="fas fa-rotate" aria-hidden="true"></i> Tải lại danh sách</button>
     </div>
   </div>

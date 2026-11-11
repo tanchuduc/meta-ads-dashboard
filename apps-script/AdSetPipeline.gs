@@ -489,12 +489,11 @@ function recomputeCtrLinkOnly_AdSetLevel(sinceStr, untilStr) {
   var ctrLinkVals = all.map(function (r) { return [r[CTR_LINK_COL_ADSET_ - 1]]; });
   var rowIndexByKey = {};
   all.forEach(function (r, i) {
-    var dk = dayKey_(r[5]); // col 6 = Reporting ends
+    var dk = dayKey_(r[7]); // col 8 = Reporting ends
     var ts = new Date(dk).getTime();
     if (isNaN(ts) || ts < sinceTs || ts > untilTs) return;
-    // key on ad set name + campaign name + date (an ad set name could theoretically
-    // repeat under a different campaign — cheap insurance, matches how the row was written)
-    rowIndexByKey[String(r[0]).trim() + '||' + String(r[1]).trim() + '||' + dk] = i;
+    // key on account id + ad set name + campaign name + date
+    rowIndexByKey[String(r[0]).trim() + '||' + String(r[2]).trim() + '||' + String(r[3]).trim() + '||' + dk] = i;
   });
 
   var params = {
@@ -573,10 +572,10 @@ function recomputeResultsOnly_AdSetLevel(sinceStr, untilStr) {
   var resultsVals = all.map(function (r) { return [r[RESULTS_COL_ADSET_ - 1]]; });
   var rowIndexByKey = {};
   all.forEach(function (r, i) {
-    var dk = dayKey_(r[5]); // col 6 = Reporting ends
+    var dk = dayKey_(r[7]); // col 8 = Reporting ends
     var ts = new Date(dk).getTime();
     if (isNaN(ts) || ts < sinceTs || ts > untilTs) return;
-    rowIndexByKey[String(r[0]).trim() + '||' + String(r[1]).trim() + '||' + dk] = i;
+    rowIndexByKey[String(r[0]).trim() + '||' + String(r[2]).trim() + '||' + String(r[3]).trim() + '||' + dk] = i;
   });
 
   var params = {

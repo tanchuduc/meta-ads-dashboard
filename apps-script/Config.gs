@@ -45,7 +45,12 @@ var ACCOUNT_ID = AD_ACCOUNTS[0].id;
  */
 function initSetupGoogleSheets() {
   var props = PropertiesService.getScriptProperties();
-  var folder = DriveApp.getFolderById(DRIVE_FOLDER_ID);
+  var folder = null;
+  try {
+    if (DRIVE_FOLDER_ID) folder = DriveApp.getFolderById(DRIVE_FOLDER_ID);
+  } catch (e) {
+    Logger.log('Cảnh báo DRIVE_FOLDER_ID (' + DRIVE_FOLDER_ID + '): ' + e.message + '. Sẽ lưu file ở thư mục My Drive gốc.');
+  }
   
   var campaignSheetId = props.getProperty('CAMPAIGN_SHEET_ID');
   var adSetSheetId = props.getProperty('ADSET_SHEET_ID');
@@ -53,7 +58,9 @@ function initSetupGoogleSheets() {
 
   if (!campaignSheetId) {
     var ssCampaign = SpreadsheetApp.create('Meta Ads - Campaign Data');
-    DriveApp.getFileById(ssCampaign.getId()).moveTo(folder);
+    if (folder) {
+      try { DriveApp.getFileById(ssCampaign.getId()).moveTo(folder); } catch (e) {}
+    }
     campaignSheetId = ssCampaign.getId();
     props.setProperty('CAMPAIGN_SHEET_ID', campaignSheetId);
     Logger.log('Đã tạo Campaign Sheet: ' + campaignSheetId);
@@ -61,7 +68,9 @@ function initSetupGoogleSheets() {
 
   if (!adSetSheetId) {
     var ssAdSet = SpreadsheetApp.create('Meta Ads - AdSet Data');
-    DriveApp.getFileById(ssAdSet.getId()).moveTo(folder);
+    if (folder) {
+      try { DriveApp.getFileById(ssAdSet.getId()).moveTo(folder); } catch (e) {}
+    }
     adSetSheetId = ssAdSet.getId();
     props.setProperty('ADSET_SHEET_ID', adSetSheetId);
     Logger.log('Đã tạo AdSet Sheet: ' + adSetSheetId);
@@ -69,7 +78,9 @@ function initSetupGoogleSheets() {
 
   if (!adSheetId) {
     var ssAd = SpreadsheetApp.create('Meta Ads - Ad & Creative Data');
-    DriveApp.getFileById(ssAd.getId()).moveTo(folder);
+    if (folder) {
+      try { DriveApp.getFileById(ssAd.getId()).moveTo(folder); } catch (e) {}
+    }
     adSheetId = ssAd.getId();
     props.setProperty('AD_SHEET_ID', adSheetId);
     Logger.log('Đã tạo Ad Sheet: ' + adSheetId);
@@ -207,3 +218,107 @@ function syncTatCaDuLieu() {
 
   Logger.log('===> HOÀN TẤT ĐỒNG BỘ TOÀN BỘ DỮ LIỆU BAN ĐẦU!');
 }
+
+/**
+ * =========================================================================
+ * HÀM 1-CLICK CÀI ĐẶT 5 TIME-DRIVEN TRIGGERS TỰ ĐỘNG BAN ĐÊM (GMT+7)
+ * =========================================================================
+ * Đảm bảo hệ thống tự thức dậy kéo dữ liệu từ Meta Ads mỗi đêm hoàn toàn tự động:
+ *   - 1:00 AM -> copyDataOnceADay   (Campaign - rolling 7 ngày)
+ *   - 2:00 AM -> importAdSetData    (Ad Set)
+ *   - 3:00 AM -> importAdData       (Ad)
+ *   - 4:00 AM -> importAdCreatives  (Creative thumbnail cache)
+ *   - 5:00 AM -> importBreakdownData(Breakdown cho Report Builder)
+ * Hàm tự động dọn sạch các trigger cũ bị trùng lặp trước khi tạo mới.
+ */
+function setupDailyAutoTriggers() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var targetHandlers = [
+    'copyDataOnceADay',
+    'importAdSetData',
+    'importAdData',
+    'importAdCreatives',
+    'importBreakdownData'
+  ];
+
+  var deletedCount = 0;
+  for (var i = 0; i < triggers.length; i++) {
+    var fn = triggers[i].getHandlerFunction();
+    if (targetHandlers.indexOf(fn) !== -1) {
+      ScriptApp.deleteTrigger(triggers[i]);
+      deletedCount++;
+    }
+  }
+
+  ScriptApp.newTrigger('copyDataOnceADay').timeBased().everyDays(1).atHour(1).create();
+  ScriptApp.newTrigger('importAdSetData').timeBased().everyDays(1).atHour(2).create();
+  ScriptApp.newTrigger('importAdData').timeBased().everyDays(1).atHour(3).create();
+  ScriptApp.newTrigger('importAdCreatives').timeBased().everyDays(1).atHour(4).create();
+  ScriptApp.newTrigger('importBreakdownData').timeBased().everyDays(1).atHour(5).create();
+
+  var msg = 'Đã cài đặt thành công 5 trigger tự động chạy đêm (1h-5h sáng GMT+7)! (Đã dọn ' + deletedCount + ' trigger cũ)';
+  Logger.log('🎉 ' + msg);
+  return {
+    ok: true,
+    deleted: deletedCount,
+    installed: targetHandlers.length,
+    message: msg
+  };
+}
+
+/**
+ * Xóa toàn bộ 5 trigger tự động (khi cần tạm dừng hệ thống)
+ */
+function removeDailyAutoTriggers() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var targetHandlers = [
+    'copyDataOnceADay',
+    'importAdSetData',
+    'importAdData',
+    'importAdCreatives',
+    'importBreakdownData'
+  ];
+  var count = 0;
+  for (var i = 0; i < triggers.length; i++) {
+    var fn = triggers[i].getHandlerFunction();
+    if (targetHandlers.indexOf(fn) !== -1) {
+      ScriptApp.deleteTrigger(triggers[i]);
+      count++;
+    }
+  }
+  Logger.log('Đã xóa ' + count + ' trigger tự động.');
+  return { ok: true, deleted: count, message: 'Đã xóa ' + count + ' trigger tự động.' };
+}
+
+/**
+ * Kiểm tra trạng thái hiện tại của các trigger tự động
+ */
+function getDailyAutoTriggersStatus() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var targetHandlers = {
+    'copyDataOnceADay': false,
+    'importAdSetData': false,
+    'importAdData': false,
+    'importAdCreatives': false,
+    'importBreakdownData': false
+  };
+  for (var i = 0; i < triggers.length; i++) {
+    var fn = triggers[i].getHandlerFunction();
+    if (targetHandlers.hasOwnProperty(fn)) {
+      targetHandlers[fn] = true;
+    }
+  }
+  var installedList = [];
+  var missingList = [];
+  Object.keys(targetHandlers).forEach(function(k) {
+    if (targetHandlers[k]) installedList.push(k);
+    else missingList.push(k);
+  });
+  return {
+    triggers: targetHandlers,
+    installedCount: installedList.length,
+    missingCount: missingList.length,
+    allInstalled: missingList.length === 0
+  };
+}
+

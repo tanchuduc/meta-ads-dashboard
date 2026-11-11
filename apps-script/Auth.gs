@@ -1068,3 +1068,34 @@ function adminResetUserPassword(sessionToken, targetUsername, newPassword) {
   }
   return res;
 }
+
+/**
+ * Super Admin API: Cài đặt toàn bộ 5 Trigger tự động ban đêm từ giao diện Web App
+ */
+function adminSetupAutoTriggers(sessionToken) {
+  var auth = requireSuperAdmin_(sessionToken);
+  if (!auth.ok) {
+    return { ok: false, authError: !!auth.authError, forbidden: !!auth.forbidden, error: auth.error };
+  }
+  if (typeof setupDailyAutoTriggers !== 'function') {
+    return { ok: false, error: 'Hàm setupDailyAutoTriggers() chưa được nạp trong Config.gs.' };
+  }
+  return setupDailyAutoTriggers();
+}
+
+/**
+ * Super Admin API: Lấy trạng thái cài đặt của các Trigger tự động
+ */
+function adminGetAutoTriggersStatus(sessionToken) {
+  var auth = requireSuperAdmin_(sessionToken);
+  if (!auth.ok) {
+    return { ok: false, authError: !!auth.authError, forbidden: !!auth.forbidden, error: auth.error };
+  }
+  if (typeof getDailyAutoTriggersStatus !== 'function') {
+    return { ok: false, error: 'Hàm getDailyAutoTriggersStatus() chưa được nạp trong Config.gs.' };
+  }
+  var res = getDailyAutoTriggersStatus();
+  res.ok = true;
+  return res;
+}
+
