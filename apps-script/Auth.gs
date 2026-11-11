@@ -1123,9 +1123,9 @@ function adminRunSyncNow(sessionToken) {
 }
 
 /**
- * Super Admin API: Bắt đầu chạy tiến trình Backfill 3 tầng (Campaign -> AdSet -> Ad)
+ * Super Admin API: Bắt đầu chạy tiến trình Backfill (hỗ trợ cả 3 tầng hoặc từng tầng riêng biệt)
  */
-function adminStartBackfill(sessionToken, days) {
+function adminStartBackfill(sessionToken, days, targetPipeline, forceRestart) {
   var auth = requireSuperAdmin_(sessionToken);
   if (!auth.ok) {
     return { ok: false, authError: !!auth.authError, forbidden: !!auth.forbidden, error: auth.error };
@@ -1136,15 +1136,38 @@ function adminStartBackfill(sessionToken, days) {
   if (typeof runAsyncBackfillJob_ !== 'function') {
     return { ok: false, error: 'Hàm runAsyncBackfillJob_ chưa được nạp.' };
   }
+
+  var pipelines = ['campaign', 'adset', 'ad'];
+  if (targetPipeline === 'adset') {
+    pipelines = ['adset'];
+  } else if (targetPipeline === 'ad') {
+    pipelines = ['ad'];
+  } else if (targetPipeline === 'campaign') {
+    pipelines = ['campaign'];
+  }
+
   var res = runAsyncBackfillJob_({
-    pipelines: ['campaign', 'adset', 'ad'],
+    pipelines: pipelines,
     since: since,
     until: until,
-    autoResume: true
+    autoResume: true,
+    fastKickoff: true,
+    force: !!forceRestart
   });
+
+  if (!res.ok) {
+    return {
+      ok: false,
+      alreadyRunning: !!res.alreadyRunning,
+      locked: !!res.locked,
+      error: res.error || (res.locked ? 'Một tiến trình khác đang ghi dữ liệu. Vui lòng thử lại sau giây lát.' : 'Không thể bắt đầu Backfill.')
+    };
+  }
+
+  var targetLabel = (pipelines.length === 1) ? pipelines[0].toUpperCase() : '3 TẦNG (Campaign → AdSet → Ad)';
   return {
     ok: true,
-    message: 'Đã kích hoạt Backfill 3 tầng (' + numDays + ' ngày qua từ ' + since + ' đến ' + until + '). Tiến trình sẽ tự động nối ca qua trigger ngầm.',
+    message: 'Đã khởi động Backfill ' + targetLabel + ' (' + numDays + ' ngày từ ' + since + ' đến ' + until + '). Hệ thống đang tự động chạy ngầm và nối ca qua trigger!',
     details: res
   };
 }

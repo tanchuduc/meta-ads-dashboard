@@ -564,6 +564,27 @@ function runAsyncBackfillJob_(jobConfig) {
   }
 
   try {
+    var props = PropertiesService.getScriptProperties();
+    var rawOld = props.getProperty(ASYNC_BACKFILL_STATE_PROP_);
+    if (rawOld && !jobConfig.force) {
+      try {
+        var oldSt = JSON.parse(rawOld);
+        if (oldSt && oldSt.completedAccountsSteps < oldSt.totalAccountSteps) {
+          var ageMs = Date.now() - (oldSt.updatedAt || oldSt.createdAt || 0);
+          if (ageMs < 7200000) { // trong vòng 2 giờ
+            var pName = oldSt.pipeline || 'unknown';
+            var pct = oldSt.totalAccountSteps > 0 ? Math.round((oldSt.completedAccountsSteps / oldSt.totalAccountSteps) * 100) : 0;
+            return {
+              ok: false,
+              alreadyRunning: true,
+              error: 'Đang có tiến trình Backfill chạy dở ở mốc ' + pct + '% (Tầng ' + pName.toUpperCase() + ', ' +
+                oldSt.completedAccountsSteps + '/' + oldSt.totalAccountSteps + ' bước, đã ghi ' + (oldSt.rowsWritten || 0) + ' dòng). Vui lòng đợi hoàn tất hoặc bấm "Hủy Backfill" trước khi bắt đầu job mới!'
+            };
+          }
+        }
+      } catch (e) {}
+    }
+
     cleanupAsyncBackfillTriggers_();
 
     var pipelines = (jobConfig.pipelines && jobConfig.pipelines.length)
@@ -603,6 +624,7 @@ function runAsyncBackfillJob_(jobConfig) {
       since: sinceStr,
       until: untilStr,
       autoResume: jobConfig.autoResume !== false,
+      fastKickoff: !!jobConfig.fastKickoff,
       breakdownTypes: breakdownTypes,
       windows: windows,
       accountIds: accounts.map(function (a) { return a.id; }),
@@ -622,9 +644,14 @@ function runAsyncBackfillJob_(jobConfig) {
 
     PropertiesService.getScriptProperties().setProperty(ASYNC_BACKFILL_STATE_PROP_, JSON.stringify(state));
     Logger.log('🚀 Bắt đầu Async Backfill [' + pipelines.join(' → ') + '] ' + sinceStr + '..' + untilStr +
-      ' (tổng ' + totalAccountSteps + ' bước trên ' + accounts.length + ' tài khoản).');
+      ' (tổng ' + totalAccountSteps + ' bước trên ' + accounts.length + ' tài khoản). FastKickoff=' + !!jobConfig.fastKickoff);
 
-    return executeAsyncBackfillBatch_(state, jobConfig.deadlineMs || (Date.now() + ASYNC_BACKFILL_SOFT_BUDGET_MS_));
+    // Nếu là fastKickoff từ Web App, chỉ chạy tối đa 12 giây để khởi tạo bước đầu rồi phản hồi ngay cho UI
+    var deadline = jobConfig.fastKickoff
+      ? (Date.now() + 12000)
+      : (jobConfig.deadlineMs || (Date.now() + ASYNC_BACKFILL_SOFT_BUDGET_MS_));
+
+    return executeAsyncBackfillBatch_(state, deadline);
   } finally {
     try { lock.releaseLock(); } catch (e) {}
   }
@@ -934,10 +961,13 @@ function executeAsyncBackfillBatch_(state, deadlineMs) {
     };
   }
 
+  var delayMs = rateLimitedPause
+    ? ASYNC_BACKFILL_RATE_LIMIT_DELAY_MS_
+    : (state.fastKickoff ? 15000 : ASYNC_BACKFILL_RESUME_DELAY_MS_);
+  state.fastKickoff = false;
   state.updatedAt = Date.now();
   props.setProperty(ASYNC_BACKFILL_STATE_PROP_, JSON.stringify(state));
 
-  var delayMs = rateLimitedPause ? ASYNC_BACKFILL_RATE_LIMIT_DELAY_MS_ : ASYNC_BACKFILL_RESUME_DELAY_MS_;
   var sched = state.autoResume ? scheduleAsyncBackfillTrigger_(delayMs) : { ok: false };
   var currentLabel = state.pipelines
     ? (state.pipeline + ' [' + (state.pIdx + 1) + '/' + state.pipelines.length + ' tầng]')
@@ -945,7 +975,7 @@ function executeAsyncBackfillBatch_(state, deadlineMs) {
   Logger.log('⏳ Tạm dừng ca Async Backfill [' + currentLabel + '] ở mốc ' +
     state.completedAccountsSteps + '/' + state.totalAccountSteps + ' (đã ghi ' + state.rowsWritten + ' dòng). ' +
     (sched.ok
-      ? ('Đã hẹn trigger tự chạy tiếp sau ' + Math.round(delayMs / 60000) + ' phút — bạn có thể đóng trình duyệt.')
+      ? ('Đã hẹn trigger tự chạy tiếp sau ' + (delayMs < 60000 ? Math.round(delayMs / 1000) + ' giây' : Math.round(delayMs / 60000) + ' phút') + ' — bạn có thể đóng trình duyệt.')
       : 'Chạy continueAsyncBackfillJob() để tiếp tục phần còn lại.'));
 
   return {
@@ -982,13 +1012,17 @@ function getAsyncBackfillStatus() {
     pName = st.pipeline + ' (' + (st.pIdx + 1) + '/' + st.pipelines.length + ' tầng: ' + st.pipelines.join(' → ') + ')';
   }
   var percent = st.totalAccountSteps > 0 ? Math.round((st.completedAccountsSteps / st.totalAccountSteps) * 100) : 0;
+  var ageMs = Date.now() - (st.updatedAt || st.createdAt || 0);
+  var isStale = ageMs > 7200000; // 2 giờ
+  var isRunning = !isStale && (st.completedAccountsSteps < st.totalAccountSteps);
   Logger.log('📊 Async Backfill [' + pName + '] ' + st.since + '..' + st.until + ': ' +
     st.completedAccountsSteps + '/' + st.totalAccountSteps + ' bước (' + percent + '%) | đã ghi ' + st.rowsWritten +
-    ' dòng | activeRunId=' + (st.activeRunId || 'none'));
-  st.isRunning = true;
+    ' dòng | isRunning=' + isRunning);
+  st.isRunning = isRunning;
   st.percent = percent;
   st.currentPipeline = st.pipeline;
   st.currentPipelineIndex = st.pIdx || 0;
   st.totalPipelines = (st.pipelines && st.pipelines.length) || 1;
+  st.updatedAgoSeconds = Math.round(ageMs / 1000);
   return st;
 }

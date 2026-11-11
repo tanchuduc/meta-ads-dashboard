@@ -5462,10 +5462,37 @@ thead th.col-campaignName {
     <div class="section-actions" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <button type="button" class="ghost-btn" id="btnAdminRunSyncNow" onclick="adminTriggerImmediateSync()"><i class="fas fa-bolt" style="color:#F59E0B" aria-hidden="true"></i> Đồng bộ Meta Ads Ngay</button>
       <button type="button" class="ghost-btn" id="btnAdminSetupTriggers" onclick="adminTriggerDailySetup()"><i class="fas fa-clock" aria-hidden="true"></i> Cài đặt 5 Trigger Chạy Đêm</button>
-      <button type="button" class="ghost-btn" id="btnAdminBackfill30" onclick="adminTriggerBackfill(30)"><i class="fas fa-database" style="color:#3B82F6" aria-hidden="true"></i> Backfill 30 Ngày (3 Tầng)</button>
-      <button type="button" class="ghost-btn" id="btnAdminBackfill90" onclick="adminTriggerBackfill(90)"><i class="fas fa-cloud-arrow-down" style="color:#8B5CF6" aria-hidden="true"></i> Backfill 90 Ngày (3 Tầng)</button>
+      <button type="button" class="ghost-btn" id="btnAdminBackfill30" onclick="adminTriggerBackfill(30, 'all')"><i class="fas fa-database" style="color:#3B82F6" aria-hidden="true"></i> Backfill 30N (3 Tầng)</button>
+      <button type="button" class="ghost-btn" id="btnAdminBackfill90" onclick="adminTriggerBackfill(90, 'all')"><i class="fas fa-cloud-arrow-down" style="color:#8B5CF6" aria-hidden="true"></i> Backfill 90N (3 Tầng)</button>
+      <button type="button" class="ghost-btn" id="btnAdminBackfillAdSet" onclick="adminTriggerBackfill(90, 'adset')"><i class="fas fa-layer-group" style="color:#10B981" aria-hidden="true"></i> Backfill AdSet (90N)</button>
+      <button type="button" class="ghost-btn" id="btnAdminBackfillAd" onclick="adminTriggerBackfill(30, 'ad')"><i class="fas fa-rectangle-ad" style="color:#EC4899" aria-hidden="true"></i> Backfill Ad (30N)</button>
       <button type="button" class="ghost-btn" id="btnAdminBackfillStatus" onclick="adminCheckBackfillStatus()"><i class="fas fa-chart-line" aria-hidden="true"></i> Tiến độ Backfill</button>
+      <button type="button" class="ghost-btn" id="btnAdminCancelBackfill" onclick="adminCancelBackfillJobPrompt()" style="color:#EF4444"><i class="fas fa-ban" aria-hidden="true"></i> Hủy Backfill</button>
       <button type="button" class="ghost-btn" onclick="loadAdminUsers()"><i class="fas fa-rotate" aria-hidden="true"></i> Tải lại danh sách</button>
+    </div>
+  </div>
+
+  <!-- BANNER TIẾN ĐỘ BACKFILL ĐỘNG -->
+  <div id="adminBackfillBanner" style="display:none;margin-bottom:16px;padding:14px 18px;background:var(--card-bg,#fff);border:1px solid var(--border-color,#e2e8f0);border-radius:10px;box-shadow:var(--shadow-sm, 0 1px 2px rgba(0,0,0,0.05))">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="spinner" style="width:16px;height:16px;border-width:2px;display:inline-block"></span>
+        <strong id="backfillBannerTitle" style="font-size:13px;color:var(--text-primary,#0f172a)">Đang chạy Backfill...</strong>
+        <span id="backfillBannerBadge" style="font-size:11px;padding:2px 8px;border-radius:12px;background:#EEF2FF;color:#4F46E5;font-weight:600">TẦNG CAMPAIGN</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span id="backfillBannerTime" style="font-size:12px;color:var(--text-secondary,#64748b)">Cập nhật vài giây trước</span>
+        <button type="button" class="ghost-btn" onclick="adminCheckBackfillStatus()" style="padding:4px 8px;font-size:11px"><i class="fas fa-rotate"></i> Làm mới</button>
+        <button type="button" class="ghost-btn" onclick="adminCancelBackfillJobPrompt()" style="padding:4px 8px;font-size:11px;color:#EF4444"><i class="fas fa-ban"></i> Hủy</button>
+      </div>
+    </div>
+    <div style="width:100%;height:8px;background:var(--slate-200,#E2E8F0);border-radius:4px;overflow:hidden">
+      <div id="backfillBannerBar" style="width:0%;height:100%;background:linear-gradient(90deg, #3B82F6, #8B5CF6);border-radius:4px;transition:width 0.3s ease"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:11px;color:var(--text-secondary,#64748b)">
+      <span id="backfillBannerStep">0 / 0 bước</span>
+      <span id="backfillBannerRows">0 dòng đã ghi</span>
+      <span id="backfillBannerPct" style="font-weight:700;color:var(--text-primary,#0f172a)">0%</span>
     </div>
   </div>
 
@@ -12183,6 +12210,7 @@ function loadAdminUsers() {
   ADMIN_STATE.loading = true;
   ADMIN_STATE.error = '';
   renderAdminUsersState_();
+  setTimeout(adminCheckBackfillStatus, 300);
 
   if (isDemo()) {
     setTimeout(function() {
@@ -12832,9 +12860,16 @@ function adminTriggerDailySetup() {
   });
 }
 
-function adminTriggerBackfill(days) {
+function adminTriggerBackfill(days, pipeline, force) {
   if (!isAuthenticated_()) return;
-  var btnId = days === 90 ? 'btnAdminBackfill90' : 'btnAdminBackfill30';
+  pipeline = pipeline || 'all';
+  var btnMap = {
+    'all_30': 'btnAdminBackfill30',
+    'all_90': 'btnAdminBackfill90',
+    'adset_90': 'btnAdminBackfillAdSet',
+    'ad_30': 'btnAdminBackfillAd'
+  };
+  var btnId = btnMap[pipeline + '_' + days] || (days === 90 ? 'btnAdminBackfill90' : 'btnAdminBackfill30');
   var btn = document.getElementById(btnId);
   var originalHtml = btn ? btn.innerHTML : '';
   if (btn) {
@@ -12847,18 +12882,21 @@ function adminTriggerBackfill(days) {
         btn.disabled = false;
         btn.innerHTML = originalHtml;
       }
-      showToast('Đã mô phỏng kích hoạt Backfill ' + days + ' ngày (Chế độ Demo).');
+      showToast('Đã mô phỏng kích hoạt Backfill ' + pipeline.toUpperCase() + ' ' + days + ' ngày (Chế độ Demo).');
     }, 500);
     return;
   }
-  gasRun_('adminStartBackfill', [getSessionToken_(), days], function(res) {
+  gasRun_('adminStartBackfill', [getSessionToken_(), days, pipeline, !!force], function(res) {
     if (btn) {
       btn.disabled = false;
       btn.innerHTML = originalHtml;
     }
     if (res && res.ok) {
-      showToast(res.message || 'Đã bắt đầu tiến trình Backfill ' + days + ' ngày cho 3 tầng!');
+      showToast(res.message || 'Đã bắt đầu tiến trình Backfill ' + days + ' ngày!');
       setTimeout(adminCheckBackfillStatus, 1500);
+    } else if (res && res.alreadyRunning) {
+      showToast('⚠️ ' + (res.error || 'Tiến trình Backfill đang chạy. Bấm Hủy nếu muốn chạy lại.'), 7000);
+      adminCheckBackfillStatus();
     } else {
       showToast('Lỗi: ' + ((res && res.error) || 'Không thể bắt đầu Backfill.'));
     }
@@ -12869,6 +12907,76 @@ function adminTriggerBackfill(days) {
     }
     showToast('Lỗi kết nối: ' + ((err && err.message) || String(err)));
   });
+}
+
+function adminCancelBackfillJobPrompt() {
+  if (!isAuthenticated_()) return;
+  if (!confirm('Bạn có chắc chắn muốn HỦY tiến trình Backfill đang chạy ngầm và dọn sạch các trigger nối ca không?')) {
+    return;
+  }
+  var btn = document.getElementById('btnAdminCancelBackfill');
+  var originalHtml = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang hủy…';
+  }
+  if (isDemo()) {
+    setTimeout(function() {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+      }
+      showToast('Đã hủy Backfill (Chế độ Demo).');
+    }, 400);
+    return;
+  }
+  gasRun_('adminCancelBackfill', [getSessionToken_()], function(res) {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+    }
+    if (res && res.ok) {
+      showToast(res.message || 'Đã hủy thành công tiến trình Backfill.');
+      adminCheckBackfillStatus();
+    } else {
+      showToast('Lỗi: ' + ((res && res.error) || 'Không thể hủy tiến trình.'));
+    }
+  }, function(err) {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+    }
+    showToast('Lỗi kết nối: ' + ((err && err.message) || String(err)));
+  });
+}
+
+function renderBackfillProgressBanner_(st) {
+  var banner = document.getElementById('adminBackfillBanner');
+  if (!banner) return;
+  if (!st || !st.isRunning) {
+    banner.style.display = 'none';
+    return;
+  }
+  banner.style.display = 'block';
+  var pName = (st.currentPipeline || st.pipeline || '').toUpperCase();
+  var title = document.getElementById('backfillBannerTitle');
+  if (title) title.textContent = 'Tiến trình Backfill đang chạy ngầm (' + (st.since || '') + ' đến ' + (st.until || '') + ')';
+  var badge = document.getElementById('backfillBannerBadge');
+  if (badge) badge.textContent = 'TẦNG ' + pName + (st.totalPipelines > 1 ? ' (' + ((st.currentPipelineIndex || 0) + 1) + '/' + st.totalPipelines + ')' : '');
+  var bar = document.getElementById('backfillBannerBar');
+  var pct = Math.max(0, Math.min(100, st.percent || 0));
+  if (bar) bar.style.width = pct + '%';
+  var pctEl = document.getElementById('backfillBannerPct');
+  if (pctEl) pctEl.textContent = pct + '%';
+  var stepEl = document.getElementById('backfillBannerStep');
+  if (stepEl) stepEl.textContent = (st.completedAccountsSteps || 0) + ' / ' + (st.totalAccountSteps || 0) + ' bước tài khoản';
+  var rowsEl = document.getElementById('backfillBannerRows');
+  if (rowsEl) rowsEl.textContent = (st.rowsWritten ? st.rowsWritten.toLocaleString() : '0') + ' dòng đã ghi';
+  var timeEl = document.getElementById('backfillBannerTime');
+  if (timeEl) {
+    var s = st.updatedAgoSeconds || 0;
+    timeEl.textContent = s < 60 ? ('Cập nhật ' + s + 's trước') : ('Cập nhật ' + Math.round(s / 60) + 'p trước');
+  }
 }
 
 function adminCheckBackfillStatus() {
@@ -12895,12 +13003,13 @@ function adminCheckBackfillStatus() {
     }
     if (res && res.ok && res.status) {
       var st = res.status;
+      renderBackfillProgressBanner_(st);
       if (!st.isRunning) {
-        showToast('Hiện tại không có job Backfill nào đang chạy.');
+        showToast('Hiện tại không có job Backfill nào đang chạy (Hệ thống sẵn sàng).');
         return;
       }
-      var pMsg = '📊 Tiến độ Backfill [' + (st.currentPipeline || st.pipeline || '') + ']: ' +
-        st.completedAccountsSteps + '/' + st.totalAccountSteps + ' bước (' + (st.percent || 0) + '%), đã ghi ' +
+      var pMsg = '📊 Tiến độ Backfill: ' + (st.percent || 0) + '% [' + (st.currentPipeline || st.pipeline || '').toUpperCase() +
+        '] - Đã xong ' + st.completedAccountsSteps + '/' + st.totalAccountSteps + ' bước, ghi ' +
         (st.rowsWritten || 0) + ' dòng.';
       showToast(pMsg);
     } else {

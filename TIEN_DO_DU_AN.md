@@ -1,7 +1,7 @@
 # BÁO CÁO TIẾN ĐỘ DỰ ÁN & BỐI CẢNH HIỆN TẠI (PROJECT STATUS)
 > **Dự án**: Meta Ads Dashboard (Hệ thống Báo cáo & Dashboard Tự động Meta Ads)  
-> **Cập nhật lần cuối**: 11/11/2026 (10:05 GMT+7)  
-> **Deployment GAS hiện tại**: `@23` (`AKfycbwiUrrO-wOlSQ8V-_6curECLrd7-n339lcJLhAwK6AUfQwzvxWeDgNYj4Xaq765-9uZ`)  
+> **Cập nhật lần cuối**: 11/11/2026 (13:00 GMT+7)  
+> **Deployment GAS hiện tại**: `@28` (`AKfycbwiUrrO-wOlSQ8V-_6curECLrd7-n339lcJLhAwK6AUfQwzvxWeDgNYj4Xaq765-9uZ`)  
 > **Mục đích tài liệu**: Tóm tắt toàn bộ bối cảnh, kiến trúc kỹ thuật, tiến độ đã hoàn thành, trạng thái cấu hình `clasp`/deploy và các bước tiếp theo để khi mở dự án trên bất kỳ máy nào (nhà hoặc công ty), AI Agent (Antigravity) và lập trình viên có thể nắm bắt và tiếp tục công việc ngay lập tức.
 
 ---
@@ -230,6 +230,18 @@ Tất cả cấu hình chính được khai báo trong [`apps-script/Config.gs`]
     - `Backfill 90 Ngày (3 Tầng)`
     - `Tiến độ Backfill` (xem trực tiếp % hoàn thành và số dòng đã ghi mà không cần mở Apps Script Editor).
 - [x] **Đã deploy thành công lên Google Apps Script `@23`**.
+
+### J. Khắc Phục Lỗi Reset Backfill Đè, Khởi Động Bất Đồng Bộ Fast-Kickoff & Nút Backfill Từng Tầng (Deploy `@28`)
+- [x] **Cơ chế Chống Reset Đè (Job Guard & Lock Protection)**:
+  - Nâng cấp `runAsyncBackfillJob_()` trong [`apps-script/InsightsAsyncRunner.gs`](apps-script/InsightsAsyncRunner.gs): kiểm tra nếu đang có tiến trình Backfill chạy dở (< 2 giờ) thì từ chối nhận lệnh mới, trả về cảnh báo chi tiết mốc % và số bước đang chạy thay vì tự xóa trigger và reset về 0%.
+  - Thêm cờ `force` và nút **`Hủy Backfill`** (`adminCancelBackfillJobPrompt`) trên Web App cho phép Super Admin chủ động dừng job nếu cần.
+- [x] **Khởi Động Nhanh (Fast Kickoff < 2s)**:
+  - Cập nhật `adminStartBackfill` trong [`apps-script/Auth.gs`](apps-script/Auth.gs) kích hoạt cờ `fastKickoff: true`: ca đầu tiên chỉ chạy tối đa 12 giây để tạo async job đầu tiên rồi trả về phản hồi ngay lập tức cho trình duyệt.
+  - Trigger tự động kích hoạt ca thứ hai chỉ sau 15 giây và tiếp tục chu trình 4 phút ngầm, loại bỏ hoàn toàn hiện tượng quay loading 4 phút gây cảm giác đơ trình duyệt.
+- [x] **Bổ sung Nút Backfill Độc Lập Từng Tầng & Banner Tiến Độ Động ([`index.html`](index.html) & [`apps-script/Dashboard.html`](apps-script/Dashboard.html))**:
+  - Thêm các nút: **`Backfill AdSet (90N)`** và **`Backfill Ad (30N)`** để người dùng có thể bù đắp trực tiếp tầng AdSet và Ad mà không cần chạy lại Campaign từ đầu.
+  - Tích hợp Card **Banner Tiến Độ Backfill Động** (`#adminBackfillBanner`) tự động cập nhật thanh % tiến độ (progress bar), tầng đang chạy, số bước hoàn tất, số dòng đã ghi và thời gian cập nhật.
+- [x] **Đã push và deploy thành công lên Google Apps Script Web App `@28`**.
 
 ---
 
