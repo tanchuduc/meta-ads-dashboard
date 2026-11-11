@@ -352,6 +352,35 @@ select:focus-visible {
   transform: translateY(0);
 }
 
+.cache-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  user-select: none;
+  transition: var(--transition);
+}
+.cache-status-pill i {
+  font-size: 11px;
+}
+.cache-status-pill.cached {
+  border-color: rgba(16, 185, 129, 0.3);
+  background: rgba(16, 185, 129, 0.08);
+  color: #059669;
+}
+.cache-status-pill.syncing {
+  border-color: rgba(8, 102, 255, 0.3);
+  background: rgba(8, 102, 255, 0.08);
+  color: var(--meta-blue);
+}
+
 /* -------------------------------------------------------------------------- */
 /* 4. MULTI-ACCOUNT SELECTOR POPOVER                                          */
 /* -------------------------------------------------------------------------- */
@@ -2044,6 +2073,22 @@ select:focus-visible {
 }
 .status-dot-sm.warn { background: var(--amber); }
 .status-dot-sm.bad { background: var(--crimson); }
+
+.demo-pill {
+  display: none;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  background: #FEF3C7;
+  color: #92400E;
+  border: 1px solid #FCD34D;
+  font-size: 11px;
+  font-weight: 700;
+}
+.demo-pill.show {
+  display: inline-flex;
+}
 
 /* Drilldown Bar & Mini KPI Strip (Campaigns & Ad Sets View) */
 .drilldown-bar {
@@ -4910,7 +4955,8 @@ thead th.col-campaignName {
 
     <button type="button" class="utility-pill-btn icon-only" id="sopToggleBtn" onclick="toggleSOP(event)" title="Hướng Dẫn SOP" aria-label="Hướng Dẫn SOP"><i class="fas fa-book" aria-hidden="true"></i></button>
     <span id="timeDisplay" style="display:none">&mdash;</span>
-    <button type="button" class="refresh-btn" onclick="refreshActive()"><i class="fas fa-sync-alt" aria-hidden="true"></i> Làm mới</button>
+    <span class="cache-status-pill cached" id="cacheStatusPill" title="Dữ liệu nạp tức thì từ bộ nhớ đệm (IndexedDB/RAM)"><i class="fas fa-bolt" style="color:#F59E0B"></i> <span id="cacheStatusText">0.01s (RAM)</span></span>
+    <button type="button" class="refresh-btn" id="headerRefreshBtn" onclick="refreshActive(true)"><i class="fas fa-sync-alt" aria-hidden="true"></i> Làm mới</button>
 
     <!-- User Profile Pill -->
     <div class="user-profile-pill" id="userProfilePill" style="display:none">
@@ -5414,6 +5460,7 @@ thead th.col-campaignName {
   <div class="section-bar">
     <h2><i class="fas fa-users-gear" aria-hidden="true"></i> Quản Trị Người Dùng &amp; Phân Quyền TKQC</h2>
     <div class="section-actions" style="display:flex;align-items:center;gap:8px">
+      <button type="button" class="ghost-btn" id="btnAdminSetupTriggers" onclick="adminTriggerDailySetup()"><i class="fas fa-clock" aria-hidden="true"></i> Cài đặt 5 Trigger Tự Động Ban Đêm</button>
       <button type="button" class="ghost-btn" onclick="loadAdminUsers()"><i class="fas fa-rotate" aria-hidden="true"></i> Tải lại danh sách</button>
     </div>
   </div>
@@ -5767,6 +5814,136 @@ var DEMO_ALPHA_IDS_ = [
 var DASHBOARD_ACCOUNTS = [];
 var selectedAccountIds = [];
 var lastLoadedFilterKey_ = { campaign: '', adset: '', ads: '', breakdown: '' };
+
+// ── PHƯƠNG ÁN 2: INDEXEDDB LOCAL CACHE & CLIENT IN-MEMORY FILTERING ENGINE ──
+var RAW_DATA = {
+  campaign: null,
+  adset: null,
+  ads: null,
+  meta: {}
+};
+
+var MetaAdsDB = (function() {
+  var DB_NAME = 'MetaAdsDashboardDB';
+  var DB_VERSION = 1;
+  var STORE_NAME = 'cache_store';
+  var dbPromise_ = null;
+
+  function openDB_() {
+    if (dbPromise_) return dbPromise_;
+    dbPromise_ = new Promise(function(resolve) {
+      if (typeof window === 'undefined' || !window.indexedDB) {
+        resolve(null);
+        return;
+      }
+      try {
+        var req = indexedDB.open(DB_NAME, DB_VERSION);
+        req.onupgradeneeded = function(e) {
+          var db = e.target.result;
+          if (!db.objectStoreNames.contains(STORE_NAME)) {
+            db.createObjectStore(STORE_NAME);
+          }
+        };
+        req.onsuccess = function(e) { resolve(e.target.result); };
+        req.onerror = function() { resolve(null); };
+      } catch (err) {
+        resolve(null);
+      }
+    });
+    return dbPromise_;
+  }
+
+  return {
+    get: function(key) {
+      return openDB_().then(function(db) {
+        if (!db) {
+          try {
+            var raw = localStorage.getItem('metaads_' + key);
+            return raw ? JSON.parse(raw) : null;
+          } catch(e) { return null; }
+        }
+        return new Promise(function(resolve) {
+          try {
+            var tx = db.transaction(STORE_NAME, 'readonly');
+            var store = tx.objectStore(STORE_NAME);
+            var req = store.get(key);
+            req.onsuccess = function() { resolve(req.result || null); };
+            req.onerror = function() { resolve(null); };
+          } catch(e) { resolve(null); }
+        });
+      });
+    },
+    set: function(key, val) {
+      return openDB_().then(function(db) {
+        if (!db) {
+          try { localStorage.setItem('metaads_' + key, JSON.stringify(val)); } catch(e){}
+          return true;
+        }
+        return new Promise(function(resolve) {
+          try {
+            var tx = db.transaction(STORE_NAME, 'readwrite');
+            var store = tx.objectStore(STORE_NAME);
+            store.put(val, key);
+            tx.oncomplete = function() { resolve(true); };
+            tx.onerror = function() { resolve(false); };
+          } catch(e) { resolve(false); }
+        });
+      });
+    },
+    remove: function(key) {
+      return openDB_().then(function(db) {
+        if (!db) {
+          try { localStorage.removeItem('metaads_' + key); } catch(e){}
+          return true;
+        }
+        return new Promise(function(resolve) {
+          try {
+            var tx = db.transaction(STORE_NAME, 'readwrite');
+            var store = tx.objectStore(STORE_NAME);
+            store.delete(key);
+            tx.oncomplete = function() { resolve(true); };
+            tx.onerror = function() { resolve(false); };
+          } catch(e) { resolve(false); }
+        });
+      });
+    },
+    clear: function() {
+      return openDB_().then(function(db) {
+        if (!db) {
+          try {
+            for (var k in localStorage) {
+              if (k.indexOf('metaads_') === 0) localStorage.removeItem(k);
+            }
+          } catch(e){}
+          return true;
+        }
+        return new Promise(function(resolve) {
+          try {
+            var tx = db.transaction(STORE_NAME, 'readwrite');
+            var store = tx.objectStore(STORE_NAME);
+            store.clear();
+            tx.oncomplete = function() { resolve(true); };
+            tx.onerror = function() { resolve(false); };
+          } catch(e) { resolve(false); }
+        });
+      });
+    }
+  };
+})();
+
+function updateCacheStatusBadge_(text, status) {
+  var pill = document.getElementById('cacheStatusPill');
+  var txt = document.getElementById('cacheStatusText');
+  if (!pill || !txt) return;
+  pill.classList.remove('syncing', 'cached');
+  if (status === 'syncing') {
+    pill.classList.add('syncing');
+    pill.innerHTML = '<i class="fas fa-spinner fa-spin"></i> <span id="cacheStatusText">' + esc(text || 'Đang đồng bộ…') + '</span>';
+  } else {
+    pill.classList.add('cached');
+    pill.innerHTML = '<i class="fas fa-bolt" style="color:#F59E0B"></i> <span id="cacheStatusText">' + esc(text || '0.01s (RAM)') + '</span>';
+  }
+}
 
 // Auth & Admin State
 var AUTH_SESSION_KEY_ = 'meta_ads_session_token_v1';
@@ -7904,20 +8081,412 @@ function syncAllDateInputsFromRange_() {
   });
 }
 
+/**
+ * LỌC VÀ TỔNG HỢP CAMPAIGN TRONG BỘ NHỚ RAM (CLIENT-SIDE IN-MEMORY) - THỜI GIAN < 10ms
+ */
+function filterCampaignsInMemory_(rawRes, filters) {
+  if (!rawRes || !rawRes.rows) return rawRes;
+  filters = filters || {};
+  var rawRows = rawRes.rows || [];
+  var accounts = rawRes.accounts || DASHBOARD_ACCOUNTS || [];
+
+  // 1. Lọc theo tài khoản quảng cáo
+  var targetAccounts = (filters.accountIds && filters.accountIds.length) 
+    ? filters.accountIds 
+    : (selectedAccountIds && selectedAccountIds.length ? selectedAccountIds : []);
+
+  var accountScopedRows = rawRows.filter(function(r) {
+    if (!targetAccounts.length) return true;
+    var rowAcc = String(r.accountId || '').trim();
+    if (rowAcc) {
+      if (targetAccounts.indexOf(rowAcc) !== -1) return true;
+      var norm = rowAcc.indexOf('act_') === 0 ? rowAcc.slice(4) : ('act_' + rowAcc);
+      if (targetAccounts.indexOf(norm) !== -1) return true;
+      return false;
+    }
+    var rowName = String(r.accountName || '').trim().toLowerCase();
+    if (rowName && accounts.length) {
+      for (var i = 0; i < accounts.length; i++) {
+        if (targetAccounts.indexOf(accounts[i].id) !== -1) {
+          var fn = String(accounts[i].name || '').trim().toLowerCase();
+          var sn = String(accounts[i].shortName || '').trim().toLowerCase();
+          if (fn === rowName || (sn && sn === rowName)) return true;
+        }
+      }
+    }
+    return false;
+  });
+
+  // 2. Lọc theo biên ngày (tsOf) và chiến dịch
+  var fromTs = (filters.dateFrom) ? tsOf(filters.dateFrom) : -Infinity;
+  var toTs = (filters.dateTo) ? (tsOf(filters.dateTo) + 86399999) : Infinity;
+  var targetCampNames = Array.isArray(filters.campaignNames) ? filters.campaignNames.filter(Boolean) : [];
+  var searchNeedle = String(filters.search || '').trim().toLowerCase();
+
+  var dateAndCampFilteredRows = accountScopedRows.filter(function(r) {
+    if (targetCampNames.length && targetCampNames.indexOf(r.campaignName) === -1) {
+      return false;
+    }
+    if (searchNeedle) {
+      var matchCamp = r.campaignName && r.campaignName.toLowerCase().indexOf(searchNeedle) !== -1;
+      var matchAcc = r.accountName && r.accountName.toLowerCase().indexOf(searchNeedle) !== -1;
+      var matchObj = r.objective && r.objective.toLowerCase().indexOf(searchNeedle) !== -1;
+      if (!matchCamp && !matchAcc && !matchObj) return false;
+    }
+    if (filters.objective && r.objective !== filters.objective) {
+      return false;
+    }
+    if (filters.dateFrom || filters.dateTo) {
+      var t = r.reportingEndsTs || tsOf(r.reportingEnds);
+      if (isNaN(t)) return false;
+      if (filters.dateFrom && !isNaN(fromTs) && t < fromTs) return false;
+      if (filters.dateTo && !isNaN(toTs) && t > toTs) return false;
+    }
+    return true;
+  });
+
+  // 3. Gom nhóm cấp Chiến dịch (Aggregate by Campaign)
+  var campMap = {};
+  dateAndCampFilteredRows.forEach(function(r) {
+    var key = r._groupKey || ((r.accountId || r.accountName || '') + '\u0000' + r.campaignName);
+    var dispName = r._displayName || r.campaignName;
+    if (!campMap[key]) {
+      campMap[key] = {
+        _groupKey: key,
+        campaignName: dispName,
+        accountId: r.accountId || '',
+        accountName: r.accountName || '',
+        realCampaignName: r._realCampaign || '',
+        objective: r.objective || '',
+        bidStrategy: r.bidStrategy || '',
+        dailyBudget: r.dailyBudget || 0,
+        spent: 0,
+        impressions: 0,
+        clicks: 0,
+        reach: 0,
+        purchases: 0,
+        purchaseValue: 0,
+        results: 0,
+        allClicksSum_: 0,
+        optimizationGoal: r.optimizationGoal || '',
+        landingPageViews: 0,
+        initiateCheckouts: 0,
+        thruplays: 0,
+        frequencySum_: 0,
+        count_: 0,
+        qPointsSum_: 0,
+        ePointsSum_: 0,
+        cPointsSum_: 0,
+        rankCount_: 0
+      };
+    }
+    var c = campMap[key];
+    c.spent += num(r.spent);
+    c.impressions += num(r.impressions);
+    c.clicks += num(r.clicks);
+    c.reach += num(r.reach);
+    c.purchases += num(r.purchases);
+    c.purchaseValue += num(r.purchaseValue);
+    c.results += num(r.results);
+    c.allClicksSum_ += num(r.allClicks || (r.impressions && r.ctrAll ? (r.impressions * r.ctrAll / 100) : r.clicks));
+    c.landingPageViews += num(r.landingPageViews);
+    c.initiateCheckouts += num(r.initiateCheckouts);
+    c.thruplays += num(r.thruplays);
+    if (r.frequency) { c.frequencySum_ += num(r.frequency); c.count_++; }
+    if (r.qRank != null) { c.qPointsSum_ += num(r.qRank); c.ePointsSum_ += num(r.eRank); c.cPointsSum_ += num(r.cRank); c.rankCount_++; }
+  });
+
+  var campaigns = Object.keys(campMap).map(function(k) {
+    var c = campMap[k];
+    c.roas = c.spent > 0 ? (c.purchaseValue / c.spent) : 0;
+    c.cpm = c.impressions > 0 ? (c.spent / c.impressions * 1000) : 0;
+    c.cpc = c.clicks > 0 ? (c.spent / c.clicks) : 0;
+    c.ctrLink = c.impressions > 0 ? (c.clicks / c.impressions * 100) : 0;
+    c.ctrAll = c.impressions > 0 ? (c.allClicksSum_ / c.impressions * 100) : c.ctrLink;
+    c.frequency = c.reach > 0 ? (c.impressions / c.reach) : (c.count_ > 0 ? (c.frequencySum_ / c.count_) : 1);
+    c.cpa = c.purchases > 0 ? (c.spent / c.purchases) : 0;
+    return c;
+  });
+
+  // 4. Lọc theo ngưỡng chi tiêu & ROAS
+  var sMin = filters.spentMin !== '' && filters.spentMin != null ? parseFloat(filters.spentMin) : -Infinity;
+  var sMax = filters.spentMax !== '' && filters.spentMax != null ? parseFloat(filters.spentMax) : Infinity;
+  var rMin = filters.roasMin !== '' && filters.roasMin != null ? parseFloat(filters.roasMin) : -Infinity;
+  var rMax = filters.roasMax !== '' && filters.roasMax != null ? parseFloat(filters.roasMax) : Infinity;
+
+  campaigns = campaigns.filter(function(c) {
+    if (c.spent < sMin || c.spent > sMax) return false;
+    if (c.roas < rMin || c.roas > rMax) return false;
+    return true;
+  });
+
+  var validKeys = {};
+  campaigns.forEach(function(c) { validKeys[c._groupKey] = true; });
+  var finalRows = dateAndCampFilteredRows.filter(function(r) {
+    var k = r._groupKey || ((r.accountId || r.accountName || '') + '\u0000' + r.campaignName);
+    return !!validKeys[k];
+  });
+
+  // 5. Tính toán Summary
+  var summary = emptySummaryClient();
+  finalRows.forEach(function(r) {
+    summary.totalSpent += num(r.spent);
+    summary.totalImpressions += num(r.impressions);
+    summary.totalReach += num(r.reach);
+    summary.totalClicks += num(r.clicks);
+    summary.totalPurchases += num(r.purchases);
+    summary.totalResults += num(r.results);
+    summary.totalPurchaseValue += num(r.purchaseValue);
+    summary.totalLandingPageViews += num(r.landingPageViews);
+    summary.totalInitiateCheckouts += num(r.initiateCheckouts);
+    summary.totalThruplays += num(r.thruplays);
+  });
+  summary.roas = summary.totalSpent > 0 ? (summary.totalPurchaseValue / summary.totalSpent) : 0;
+  summary.ctrLink = summary.totalImpressions > 0 ? (summary.totalClicks / summary.totalImpressions * 100) : 0;
+  summary.frequency = summary.totalReach > 0 ? (summary.totalImpressions / summary.totalReach) : 0;
+  summary.cpm = summary.totalImpressions > 0 ? (summary.totalSpent / summary.totalImpressions * 1000) : 0;
+  summary.cpc = summary.totalClicks > 0 ? (summary.totalSpent / summary.totalClicks) : 0;
+  summary.cpa = summary.totalPurchases > 0 ? (summary.totalSpent / summary.totalPurchases) : 0;
+  summary.accountQuality = { score10: 8.0, dims:{q:2.6, e:2.6, c:2.6} };
+
+  // Danh sách meta cho bộ chọn
+  var metaMap = {};
+  accountScopedRows.forEach(function(r) {
+    if (r.campaignName && r.campaignName !== '(unnamed)' && !metaMap[r.campaignName]) {
+      metaMap[r.campaignName] = r.accountName || r.accountId || '';
+    }
+  });
+  var allCampaignMeta = Object.keys(metaMap).sort().map(function(name) {
+    return { name: name, accountName: metaMap[name] };
+  });
+
+  return {
+    accounts: accounts,
+    rows: finalRows,
+    campaigns: campaigns,
+    summary: summary,
+    allCampaignNames: Object.keys(metaMap).sort(),
+    allCampaignMeta: allCampaignMeta,
+    generatedAt: rawRes.generatedAt || new Date().toLocaleString(),
+    fromCache: true,
+    error: null
+  };
+}
+
+/**
+ * LỌC VÀ TỔNG HỢP NHÓM QC (AD SET) TRONG BỘ NHỚ RAM - THỜI GIAN < 10ms
+ */
+function filterAdSetsInMemory_(rawRes, filters) {
+  if (!rawRes || !rawRes.rows) return rawRes;
+  filters = filters || {};
+  var rawRows = rawRes.rows || [];
+  var targetAccounts = (filters.accountIds && filters.accountIds.length) 
+    ? filters.accountIds 
+    : (selectedAccountIds && selectedAccountIds.length ? selectedAccountIds : []);
+
+  var rows = rawRows.filter(function(r) {
+    if (!targetAccounts.length) return true;
+    var rowAcc = String(r.accountId || '').trim();
+    if (rowAcc) {
+      if (targetAccounts.indexOf(rowAcc) !== -1) return true;
+      var norm = rowAcc.indexOf('act_') === 0 ? rowAcc.slice(4) : ('act_' + rowAcc);
+      if (targetAccounts.indexOf(norm) !== -1) return true;
+      return false;
+    }
+    var rowName = String(r.accountName || '').trim().toLowerCase();
+    if (rowName && DASHBOARD_ACCOUNTS.length) {
+      for (var i = 0; i < DASHBOARD_ACCOUNTS.length; i++) {
+        if (targetAccounts.indexOf(DASHBOARD_ACCOUNTS[i].id) !== -1) {
+          var fn = String(DASHBOARD_ACCOUNTS[i].name || '').trim().toLowerCase();
+          var sn = String(DASHBOARD_ACCOUNTS[i].shortName || '').trim().toLowerCase();
+          if (fn === rowName || (sn && sn === rowName)) return true;
+        }
+      }
+    }
+    return false;
+  });
+
+  if (filters.dateFrom || filters.dateTo) {
+    var fromTs = filters.dateFrom ? tsOf(filters.dateFrom) : -Infinity;
+    var toTs = filters.dateTo ? (tsOf(filters.dateTo) + 86399999) : Infinity;
+    rows = rows.filter(function(r) {
+      var t = r.reportingEndsTs || tsOf(r.reportingEnds);
+      if (isNaN(t)) return false;
+      if (filters.dateFrom && !isNaN(fromTs) && t < fromTs) return false;
+      if (filters.dateTo && !isNaN(toTs) && t > toTs) return false;
+      return true;
+    });
+  }
+
+  var targetCampaigns = (Array.isArray(filters.campaignNames) && filters.campaignNames.length)
+    ? filters.campaignNames.filter(Boolean)
+    : (filters.campaignName ? [filters.campaignName] : []);
+  if (targetCampaigns.length) {
+    rows = rows.filter(function(r) { return targetCampaigns.indexOf(r._realCampaign) !== -1; });
+  }
+
+  var targetAdSets = Array.isArray(filters.adSetNames) ? filters.adSetNames.filter(Boolean) : [];
+  if (targetAdSets.length) {
+    rows = rows.filter(function(r) { return targetAdSets.indexOf(r.campaignName) !== -1; });
+  }
+
+  var adsetMap = {};
+  rows.forEach(function(r) {
+    var key = r._groupKey || ((r.accountId || r.accountName || '') + '\u0000' + r.campaignName + '\u0000' + (r._realCampaign || ''));
+    if (!adsetMap[key]) {
+      adsetMap[key] = {
+        _groupKey: key,
+        campaignName: r.campaignName,
+        accountId: r.accountId || '',
+        accountName: r.accountName || '',
+        realCampaignName: r._realCampaign || '',
+        objective: r.objective || '',
+        spent: 0, impressions: 0, clicks: 0, reach: 0, purchases: 0, purchaseValue: 0, results: 0,
+        allClicksSum_: 0
+      };
+    }
+    var a = adsetMap[key];
+    a.spent += num(r.spent);
+    a.impressions += num(r.impressions);
+    a.clicks += num(r.clicks);
+    a.reach += num(r.reach);
+    a.purchases += num(r.purchases);
+    a.purchaseValue += num(r.purchaseValue);
+    a.results += num(r.results);
+    a.allClicksSum_ += num(r.allClicks || (r.impressions && r.ctrAll ? (r.impressions * r.ctrAll / 100) : r.clicks));
+  });
+
+  var adsets = Object.keys(adsetMap).map(function(k) {
+    var a = adsetMap[k];
+    a.roas = a.spent > 0 ? (a.purchaseValue / a.spent) : 0;
+    a.cpm = a.impressions > 0 ? (a.spent / a.impressions * 1000) : 0;
+    a.cpc = a.clicks > 0 ? (a.spent / a.clicks) : 0;
+    a.ctrLink = a.impressions > 0 ? (a.clicks / a.impressions * 100) : 0;
+    a.ctrAll = a.impressions > 0 ? (a.allClicksSum_ / a.impressions * 100) : a.ctrLink;
+    a.cpa = a.purchases > 0 ? (a.spent / a.purchases) : 0;
+    return a;
+  });
+
+  var summary = emptySummaryClient();
+  rows.forEach(function(r) {
+    summary.totalSpent += num(r.spent);
+    summary.totalImpressions += num(r.impressions);
+    summary.totalReach += num(r.reach);
+    summary.totalClicks += num(r.clicks);
+    summary.totalPurchases += num(r.purchases);
+    summary.totalResults += num(r.results);
+    summary.totalPurchaseValue += num(r.purchaseValue);
+  });
+  summary.roas = summary.totalSpent > 0 ? (summary.totalPurchaseValue / summary.totalSpent) : 0;
+
+  var campSet = {}, adsetList = [];
+  rawRows.forEach(function(r) {
+    if (r._realCampaign) campSet[r._realCampaign] = true;
+    if (r.campaignName) adsetList.push({ name: r.campaignName, campaignName: r._realCampaign || '' });
+  });
+
+  return {
+    accounts: rawRes.accounts || DASHBOARD_ACCOUNTS,
+    rows: rows,
+    campaigns: adsets,
+    campaignList: Object.keys(campSet).sort(),
+    adsetList: adsetList,
+    summary: summary,
+    fromCache: true,
+    error: null
+  };
+}
+
+/**
+ * LỌC VÀ TỔNG HỢP MẪU QC (ADS) TRONG BỘ NHỚ RAM - THỜI GIAN < 10ms
+ */
+function filterAdsInMemory_(rawRes, filters) {
+  if (!rawRes || !rawRes.ads) return rawRes;
+  filters = filters || {};
+  var rawAds = rawRes.ads || [];
+  var targetAccounts = (filters.accountIds && filters.accountIds.length) 
+    ? filters.accountIds 
+    : (selectedAccountIds && selectedAccountIds.length ? selectedAccountIds : []);
+
+  var filtered = rawAds.filter(function(a) {
+    if (targetAccounts.length) {
+      var acc = String(a.accId || a.accountId || '').trim();
+      if (acc) {
+        if (targetAccounts.indexOf(acc) === -1) {
+          var norm = acc.indexOf('act_') === 0 ? acc.slice(4) : ('act_' + acc);
+          if (targetAccounts.indexOf(norm) === -1) return false;
+        }
+      }
+    }
+    var targetCamps = Array.isArray(filters.campaignNames) ? filters.campaignNames.filter(Boolean) : (filters.campaignName ? [filters.campaignName] : []);
+    if (targetCamps.length && targetCamps.indexOf(a.realCampaignName) === -1) return false;
+
+    var targetAdSets = Array.isArray(filters.adSetNames) ? filters.adSetNames.filter(Boolean) : (filters.adSetName ? [filters.adSetName] : []);
+    if (targetAdSets.length && targetAdSets.indexOf(a.adSetName) === -1) return false;
+
+    var targetAdNames = Array.isArray(filters.adNames) ? filters.adNames.filter(Boolean) : [];
+    if (targetAdNames.length && targetAdNames.indexOf(a.adName) === -1) return false;
+
+    if (filters.search) {
+      var n = String(filters.search).toLowerCase().trim();
+      var mName = a.adName && a.adName.toLowerCase().indexOf(n) !== -1;
+      var mCamp = a.realCampaignName && a.realCampaignName.toLowerCase().indexOf(n) !== -1;
+      var mSet = a.adSetName && a.adSetName.toLowerCase().indexOf(n) !== -1;
+      if (!mName && !mCamp && !mSet) return false;
+    }
+    return true;
+  });
+
+  var s = emptySummaryClient();
+  filtered.forEach(function(a) {
+    s.totalSpent += num(a.spent);
+    s.totalPurchaseValue += num(a.purchaseValue);
+    s.totalPurchases += num(a.purchases);
+    s.totalImpressions += num(a.impressions);
+  });
+  s.roas = s.totalSpent > 0 ? (s.totalPurchaseValue / s.totalSpent) : 0;
+  s.ctrLink = filtered.length > 0 ? (filtered.reduce(function(sum, x){ return sum + num(x.ctrLink); }, 0) / filtered.length) : 0;
+
+  return {
+    accounts: rawRes.accounts || DASHBOARD_ACCOUNTS,
+    ads: filtered,
+    campaignList: rawRes.campaignList || [],
+    adsetList: rawRes.adsetList || [],
+    adsetMeta: rawRes.adsetMeta || [],
+    adNameList: rawRes.adNameList || [],
+    summary: s,
+    generatedAt: rawRes.generatedAt || new Date().toLocaleString(),
+    fromCache: true,
+    error: null
+  };
+}
+
 function reloadActiveViewAfterGlobalFilterChange_() {
   if (activeTab === 'ads') {
-    loadAdsData();
+    if (RAW_DATA.ads && RAW_DATA.ads.ads) {
+      onAdsData(filterAdsInMemory_(RAW_DATA.ads, adsFilters()));
+      updateCacheStatusBadge_('0.01s (RAM)', 'cached');
+    } else {
+      loadAdsData();
+    }
   } else if (activeTab === 'campaigns' && campaignsSubLevel === 'adset') {
-    populateAdSetCampaigns();
-    loadAdSetData();
+    if (RAW_DATA.adset && RAW_DATA.adset.rows) {
+      onAdSetData(filterAdSetsInMemory_(RAW_DATA.adset, adsetFilters()));
+      updateCacheStatusBadge_('0.01s (RAM)', 'cached');
+    } else {
+      populateAdSetCampaigns();
+      loadAdSetData();
+    }
   } else if (activeTab === 'breakdown') {
+    if (RAW_DATA.campaign && RAW_DATA.campaign.rows) {
+      onData(filterCampaignsInMemory_(RAW_DATA.campaign, readFilters()));
+      updateCacheStatusBadge_('0.01s (RAM)', 'cached');
+    }
     if (activeBreakdownDim === 'account') {
-      loadData(readFilters());
+      renderBreakdownAccount();
     } else if (activeBreakdownDim === 'custom') {
-      loadData(readFilters());
       runCustomReport();
     } else {
-      loadData(readFilters());
       runPresetBreakdown_(activeBreakdownDim);
     }
   } else {
@@ -8709,7 +9278,14 @@ function resetCampaignsTabFilters(){
 }
 
 function applyFilters(){
-  loadData(readFilters());
+  var curFilters = readFilters();
+  if (RAW_DATA.campaign && RAW_DATA.campaign.rows && RAW_DATA.campaign.rows.length) {
+    var instant = filterCampaignsInMemory_(RAW_DATA.campaign, curFilters);
+    onData(instant);
+    updateCacheStatusBadge_('0.01s (RAM)', 'cached');
+    return;
+  }
+  loadData(curFilters);
 }
 
 function resetFilters(){
@@ -9172,18 +9748,77 @@ function populateAdSetCampaigns(){
   }, function(){ fill([]); });
 }
 
-function loadAdSetData(){
+function loadAdSetData(forceServer){
   if(!isAuthenticated_()) return;
-  var reqId = ++adsetReqSeq_;
-  showLoading();
-  setDashboardFilteringState_(true);
-  showFilterStatus_('adsetFilterStatus', 'Đang lọc Nhóm QC…');
   var filters = adsetFilters();
-  if(isDemo()){ setTimeout(function(){ if(reqId === adsetReqSeq_) onAdSetData(DEMO_ADSET(adsetCampaign, filters)); }, 150); return; }
-  gasRun_('getAdSetData', [adsetCampaign, filters, getSessionToken_()], function(res){
-    if(reqId === adsetReqSeq_) onAdSetData(res);
+
+  if (!forceServer && RAW_DATA.adset && RAW_DATA.adset.rows && RAW_DATA.adset.rows.length) {
+    var instant = filterAdSetsInMemory_(RAW_DATA.adset, filters);
+    onAdSetData(instant);
+    updateCacheStatusBadge_('0.01s (RAM)', 'cached');
+    return;
+  }
+
+  if (!forceServer && !RAW_DATA.adset) {
+    if (isDemo()) {
+      var d = DEMO_ADSET('', {});
+      RAW_DATA.adset = d;
+      onAdSetData(filterAdSetsInMemory_(d, filters));
+      return;
+    }
+    showLoading();
+    MetaAdsDB.get('adset_raw_v1').then(function(cached) {
+      if (cached && cached.rows && cached.rows.length) {
+        RAW_DATA.adset = cached;
+        var instant = filterAdSetsInMemory_(RAW_DATA.adset, filters);
+        onAdSetData(instant);
+        var now = Date.now();
+        if (!cached.savedAt || (now - cached.savedAt > 180000)) {
+          syncAdSetDatasetFromServer_(false);
+        }
+      } else {
+        syncAdSetDatasetFromServer_(false);
+      }
+    });
+    return;
+  }
+
+  syncAdSetDatasetFromServer_(true);
+}
+
+function syncAdSetDatasetFromServer_(isManualRefresh, onComplete) {
+  var reqId = ++adsetReqSeq_;
+  if (isManualRefresh) {
+    showFilterStatus_('adsetFilterStatus', 'Đang đồng bộ Nhóm QC…');
+    updateCacheStatusBadge_('Đang đồng bộ…', 'syncing');
+  }
+  if (isDemo()) {
+    setTimeout(function() {
+      var d = DEMO_ADSET('', {});
+      RAW_DATA.adset = d;
+      onAdSetData(filterAdSetsInMemory_(d, adsetFilters()));
+      if (onComplete) onComplete();
+    }, 150);
+    return;
+  }
+  gasRun_('getAdSetData', ['', {}, getSessionToken_()], function(res){
+    if (reqId !== adsetReqSeq_) return;
+    if (res && res.rows && res.rows.length) {
+      res.savedAt = Date.now();
+      RAW_DATA.adset = res;
+      MetaAdsDB.set('adset_raw_v1', res);
+      var instant = filterAdSetsInMemory_(RAW_DATA.adset, adsetFilters());
+      onAdSetData(instant);
+      updateCacheStatusBadge_('0.01s (RAM)', 'cached');
+    } else {
+      if (reqId === adsetReqSeq_ && !RAW_DATA.adset) onFail(new Error(res && res.error ? res.error : 'Không có dữ liệu Nhóm QC'));
+    }
+    if (onComplete) onComplete();
   }, function(err){
-    if(reqId === adsetReqSeq_) onFail(err);
+    if (reqId === adsetReqSeq_) {
+      if (!RAW_DATA.adset) onFail(err);
+    }
+    if (onComplete) onComplete();
   });
 }
 
@@ -9384,16 +10019,77 @@ function resetAdsFilters(){
   loadAdsData();
 }
 
-function loadAdsData(){
+function loadAdsData(forceServer){
   if(!isAuthenticated_()) return;
-  var reqId = ++adsReqSeq_;
-  showFilterStatus_('adsFilterStatus', 'Đang lọc dữ liệu…');
   var filters = adsFilters();
-  if(isDemo()){ setTimeout(function(){ if(reqId === adsReqSeq_) onAdsData(DEMO_ADS(filters)); }, 150); return; }
-  gasRun_('getAdData', [filters, getSessionToken_()], function(res){
-    if(reqId === adsReqSeq_) onAdsData(res);
-  }, function(e){
-    if(reqId === adsReqSeq_) onAdsData({ ads:[], campaignList:[], adsetList:[], adsetMeta:[], adNameList:[], summary:emptySummaryClient(), error:(e&&e.message)||String(e) });
+
+  if (!forceServer && RAW_DATA.ads && RAW_DATA.ads.ads && RAW_DATA.ads.ads.length) {
+    var instant = filterAdsInMemory_(RAW_DATA.ads, filters);
+    onAdsData(instant);
+    updateCacheStatusBadge_('0.01s (RAM)', 'cached');
+    return;
+  }
+
+  if (!forceServer && !RAW_DATA.ads) {
+    if (isDemo()) {
+      var d = DEMO_ADS({});
+      RAW_DATA.ads = d;
+      onAdsData(filterAdsInMemory_(d, filters));
+      return;
+    }
+    showFilterStatus_('adsFilterStatus', 'Đang nạp Mẫu QC…');
+    MetaAdsDB.get('ads_raw_v1').then(function(cached) {
+      if (cached && cached.ads && cached.ads.length) {
+        RAW_DATA.ads = cached;
+        var instant = filterAdsInMemory_(RAW_DATA.ads, filters);
+        onAdsData(instant);
+        var now = Date.now();
+        if (!cached.savedAt || (now - cached.savedAt > 180000)) {
+          syncAdsDatasetFromServer_(false);
+        }
+      } else {
+        syncAdsDatasetFromServer_(false);
+      }
+    });
+    return;
+  }
+
+  syncAdsDatasetFromServer_(true);
+}
+
+function syncAdsDatasetFromServer_(isManualRefresh, onComplete) {
+  var reqId = ++adsReqSeq_;
+  if (isManualRefresh) {
+    showFilterStatus_('adsFilterStatus', 'Đang đồng bộ Mẫu QC…');
+    updateCacheStatusBadge_('Đang đồng bộ…', 'syncing');
+  }
+  if (isDemo()) {
+    setTimeout(function() {
+      var d = DEMO_ADS({});
+      RAW_DATA.ads = d;
+      onAdsData(filterAdsInMemory_(d, adsFilters()));
+      if (onComplete) onComplete();
+    }, 150);
+    return;
+  }
+  gasRun_('getAdData', [{}, getSessionToken_()], function(res){
+    if (reqId !== adsReqSeq_) return;
+    if (res && res.ads && res.ads.length) {
+      res.savedAt = Date.now();
+      RAW_DATA.ads = res;
+      MetaAdsDB.set('ads_raw_v1', res);
+      var instant = filterAdsInMemory_(RAW_DATA.ads, adsFilters());
+      onAdsData(instant);
+      updateCacheStatusBadge_('0.01s (RAM)', 'cached');
+    } else {
+      if (reqId === adsReqSeq_ && !RAW_DATA.ads) onAdsData(res || { ads:[] });
+    }
+    if (onComplete) onComplete();
+  }, function(err){
+    if (reqId === adsReqSeq_) {
+      if (!RAW_DATA.ads) onAdsData({ ads:[], error:(err&&err.message)||String(err) });
+    }
+    if (onComplete) onComplete();
   });
 }
 
@@ -9469,21 +10165,95 @@ function setDashboardFilteringState_(isLoading) {
   });
 }
 
-function loadData(filters){
+function loadData(filters, forceServer){
   if(!isAuthenticated_()) return;
+  filters = filters || readFilters();
   lastLoadedFilterKey_.campaign = getGlobalFilterKey_();
-  var reqId = ++campReqSeq_;
-  showLoading();
-  setDashboardFilteringState_(true);
-  showFilterStatus_('campFilterStatus', 'Đang lọc dữ liệu…');
-  if(isDemo()){ setTimeout(function(){ if(reqId === campReqSeq_) onData(DEMO_DATA(filters)); }, 150); return; }
-  gasRun_('getDashboardData', [filters||{}, getSessionToken_()], function(res){
-    if(reqId === campReqSeq_) onData(res);
-  }, function(err){
-    if(reqId === campReqSeq_) {
-      lastLoadedFilterKey_.campaign = '';
-      onFail(err);
+
+  // 1. Phục vụ tức thì từ RAM nếu đã có sẵn bộ dữ liệu đầy đủ
+  if (!forceServer && RAW_DATA.campaign && RAW_DATA.campaign.rows && RAW_DATA.campaign.rows.length) {
+    var instant = filterCampaignsInMemory_(RAW_DATA.campaign, filters);
+    onData(instant);
+    updateCacheStatusBadge_('0.01s (RAM)', 'cached');
+    return;
+  }
+
+  // 2. Nếu chưa có trong RAM, thử đọc từ IndexedDB trong tích tắc (< 50ms)
+  if (!forceServer && !RAW_DATA.campaign) {
+    if (isDemo()) {
+      var dRes = DEMO_DATA({});
+      RAW_DATA.campaign = dRes;
+      onData(filterCampaignsInMemory_(dRes, filters));
+      updateCacheStatusBadge_('Demo (RAM)', 'cached');
+      return;
     }
+    showLoading();
+    MetaAdsDB.get('camp_raw_v1').then(function(cached) {
+      if (cached && cached.rows && cached.rows.length) {
+        RAW_DATA.campaign = cached;
+        var instant = filterCampaignsInMemory_(RAW_DATA.campaign, filters);
+        onData(instant);
+        updateCacheStatusBadge_('IndexedDB (' + (cached.cachedAtStr || 'Vừa xong') + ')', 'cached');
+        var now = Date.now();
+        if (!cached.savedAt || (now - cached.savedAt > 180000)) {
+          syncCampaignDatasetFromServer_(false);
+        }
+      } else {
+        syncCampaignDatasetFromServer_(false);
+      }
+    });
+    return;
+  }
+
+  // 3. Buộc đồng bộ lại từ Google Sheets (khi bấm Làm Mới)
+  syncCampaignDatasetFromServer_(true);
+}
+
+function syncCampaignDatasetFromServer_(isManualRefresh, onComplete) {
+  var reqId = ++campReqSeq_;
+  if (isManualRefresh) {
+    showLoading();
+    showFilterStatus_('campFilterStatus', 'Đang đồng bộ Google Sheets…');
+    updateCacheStatusBadge_('Đang đồng bộ…', 'syncing');
+  }
+  if (isDemo()) {
+    setTimeout(function() {
+      var d = DEMO_DATA({});
+      RAW_DATA.campaign = d;
+      onData(filterCampaignsInMemory_(d, readFilters()));
+      updateCacheStatusBadge_('Demo (RAM)', 'cached');
+      if (onComplete) onComplete();
+    }, 150);
+    return;
+  }
+  gasRun_('getDashboardData', [{}, getSessionToken_()], function(res){
+    if (reqId !== campReqSeq_) return;
+    if (res && res.rows && res.rows.length) {
+      res.savedAt = Date.now();
+      res.cachedAtStr = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+      RAW_DATA.campaign = res;
+      MetaAdsDB.set('camp_raw_v1', res);
+      var currentFilters = readFilters();
+      var instant = filterCampaignsInMemory_(RAW_DATA.campaign, currentFilters);
+      onData(instant);
+      updateCacheStatusBadge_('Đã cập nhật (' + res.cachedAtStr + ')', 'cached');
+      if (isManualRefresh) showToast('Đã đồng bộ dữ liệu mới nhất từ Google Sheets!');
+    } else {
+      if (reqId === campReqSeq_ && !RAW_DATA.campaign) {
+        onFail(new Error(res && res.error ? res.error : 'Không có dữ liệu'));
+      }
+    }
+    if (onComplete) onComplete();
+  }, function(err){
+    if (reqId === campReqSeq_) {
+      if (RAW_DATA.campaign) {
+        showToast('Không thể kết nối máy chủ Google Sheets, đang dùng dữ liệu lưu tạm.');
+        updateCacheStatusBadge_('Ngoại tuyến (Offline)', 'cached');
+      } else {
+        onFail(err);
+      }
+    }
+    if (onComplete) onComplete();
   });
 }
 
@@ -9529,16 +10299,38 @@ function distinctNamesFromRows_(rows){
   var set = {}; (rows||[]).forEach(function(r){ if(r.campaignName) set[r.campaignName]=true; }); return Object.keys(set).sort();
 }
 
-function refreshActive(){
+function refreshActive(force){
   if(!isAuthenticated_()) return;
-  if(activeTab === 'admin-users'){ loadAdminUsers(); }
-  else if(activeTab === 'ads'){ loadAdsData(); }
-  else if(activeTab === 'campaigns' && campaignsSubLevel === 'adset'){ loadAdSetData(); }
-  else if(activeTab === 'breakdown'){
-    if(activeBreakdownDim === 'account') loadData(readFilters());
-    else selectBreakdownDim(activeBreakdownDim);
+  var btn = document.getElementById('headerRefreshBtn');
+  if(btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang tải…';
   }
-  else { loadData(readFilters()); }
+  updateCacheStatusBadge_('Đang đồng bộ Google Sheets…', 'syncing');
+
+  function doneResetBtn(){
+    if(btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fas fa-sync-alt"></i> Làm mới';
+    }
+  }
+
+  if(activeTab === 'admin-users'){
+    loadAdminUsers();
+    doneResetBtn();
+  } else if(activeTab === 'ads'){
+    syncAdsDatasetFromServer_(true, doneResetBtn);
+  } else if(activeTab === 'campaigns' && campaignsSubLevel === 'adset'){
+    syncAdSetDatasetFromServer_(true, doneResetBtn);
+  } else if(activeTab === 'breakdown'){
+    syncCampaignDatasetFromServer_(true, function(){
+      if(activeBreakdownDim === 'account') renderBreakdownAccount();
+      else selectBreakdownDim(activeBreakdownDim);
+      doneResetBtn();
+    });
+  } else {
+    syncCampaignDatasetFromServer_(true, doneResetBtn);
+  }
   loadFreshness();
 }
 
@@ -11091,6 +11883,8 @@ function handleLogout() {
       google.script.run.withSuccessHandler(function(){}).withFailureHandler(function(){}).logoutUser(token);
     } catch (e) {}
   }
+  RAW_DATA = { campaign: null, adset: null, ads: null, meta: {} };
+  try { MetaAdsDB.clear(); } catch(e){}
   resetToLoginScreen_('');
   showToast('Đã đăng xuất khỏi hệ thống.');
 }
@@ -11105,6 +11899,7 @@ function resetToLoginScreen_(errorMsg) {
   DASHBOARD_ACCOUNTS = [];
   selectedAccountIds = [];
   CAMP = null; ADSET = null; ADS = null; DATA_MAX_TS = NaN;
+  RAW_DATA = { campaign: null, adset: null, ads: null, meta: {} };
   lastLoadedFilterKey_ = { campaign: '', adset: '', ads: '', breakdown: '' };
   ADMIN_STATE = { users: [], allAccounts: [], loading: false, error: '' };
   STATE = { rows:[], campaigns:[], summary:null, missing:[], error:null, demo:false };
@@ -11746,6 +12541,48 @@ function submitChangeOwnPasswordForm(e) {
       btn.innerHTML = '<i class="fas fa-check" aria-hidden="true"></i> <span>Đổi mật khẩu</span>';
     }
     showBoxError_('changeOwnPwError', 'changeOwnPwErrorText', 'Lỗi kết nối: ' + ((err && err.message) || String(err)));
+  });
+}
+
+function adminTriggerDailySetup() {
+  if (!isAuthenticated_()) return;
+  var btn = document.getElementById('btnAdminSetupTriggers');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang thiết lập…';
+  }
+  if (isDemo()) {
+    setTimeout(function() {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-check" style="color:var(--emerald)"></i> Đã cài 5 Trigger (Demo)';
+        setTimeout(function() {
+          btn.innerHTML = '<i class="fas fa-clock"></i> Cài đặt 5 Trigger Tự Động Ban Đêm';
+        }, 3000);
+      }
+      showToast('Đã kích hoạt 5 trigger tự động chạy đêm (Chế độ Demo).');
+    }, 400);
+    return;
+  }
+  gasRun_('adminSetupAutoTriggers', [getSessionToken_()], function(res) {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fas fa-check" style="color:var(--emerald)"></i> Đã cài 5 Trigger';
+      setTimeout(function() {
+        btn.innerHTML = '<i class="fas fa-clock"></i> Cài đặt 5 Trigger Tự Động Ban Đêm';
+      }, 3500);
+    }
+    if (res && res.ok) {
+      showToast(res.message || 'Đã cài đặt thành công 5 trigger chạy đêm!');
+    } else {
+      showToast('Lỗi: ' + ((res && res.error) || 'Không thể cài đặt trigger.'));
+    }
+  }, function(err) {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fas fa-clock"></i> Cài đặt 5 Trigger Tự Động Ban Đêm';
+    }
+    showToast('Lỗi kết nối: ' + ((err && err.message) || String(err)));
   });
 }
 

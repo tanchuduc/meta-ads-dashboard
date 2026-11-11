@@ -509,10 +509,10 @@ function recomputeCtrLinkOnly_AdLevel(sinceStr, untilStr) {
   var ctrLinkVals = all.map(function (r) { return [r[CTR_LINK_COL_AD_ - 1]]; });
   var rowIndexByKey = {}; // ad_id + date is a genuinely unique key, unlike names
   all.forEach(function (r, i) {
-    var dk = dayKey_(r[7]); // col 8 = Reporting ends (Ad ID, Ad name, Ad set name, Campaign name, Objective, Attribution, Bid strategy, Reporting ends)
+    var dk = dayKey_(r[9]); // col 10 = Reporting ends (Account ID, Account Name, Ad ID, Ad name, Ad set name, Campaign name, Objective, Attribution, Bid strategy, Reporting ends)
     var ts = new Date(dk).getTime();
     if (isNaN(ts) || ts < sinceTs || ts > untilTs) return;
-    rowIndexByKey[String(r[0]).trim() + '||' + dk] = i;
+    rowIndexByKey[String(r[2]).trim() + '||' + dk] = i;
   });
 
   var params = {
@@ -590,10 +590,10 @@ function recomputeResultsOnly_AdLevel(sinceStr, untilStr) {
   var resultsVals = all.map(function (r) { return [r[RESULTS_COL_AD_ - 1]]; });
   var rowIndexByKey = {}; // ad_id + date is a genuinely unique key, unlike names
   all.forEach(function (r, i) {
-    var dk = dayKey_(r[7]); // col 8 = Reporting ends
+    var dk = dayKey_(r[9]); // col 10 = Reporting ends
     var ts = new Date(dk).getTime();
     if (isNaN(ts) || ts < sinceTs || ts > untilTs) return;
-    rowIndexByKey[String(r[0]).trim() + '||' + dk] = i;
+    rowIndexByKey[String(r[2]).trim() + '||' + dk] = i;
   });
 
   var params = {

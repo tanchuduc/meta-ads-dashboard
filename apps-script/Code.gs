@@ -134,6 +134,7 @@ function toNumber(v) {
 
 function toDateString(v) {
   if (v instanceof Date) {
+    if (isNaN(v.getTime())) return '';
     return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
   }
   const s = String(v == null ? '' : v).trim();
@@ -142,7 +143,17 @@ function toDateString(v) {
   if (m) return m[1];
   const dmy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
   if (dmy) {
-    return dmy[3] + '-' + ('0' + dmy[2]).slice(-2) + '-' + ('0' + dmy[1]).slice(-2);
+    var p1 = parseInt(dmy[1], 10);
+    var p2 = parseInt(dmy[2], 10);
+    if (p1 > 12) {
+      // Day is p1, Month is p2 (e.g. 25/11/2026)
+      return dmy[3] + '-' + ('0' + p2).slice(-2) + '-' + ('0' + p1).slice(-2);
+    } else if (p2 > 12) {
+      // Day is p2, Month is p1 (e.g. 11/25/2026)
+      return dmy[3] + '-' + ('0' + p1).slice(-2) + '-' + ('0' + p2).slice(-2);
+    }
+    // Default in Vietnam locale: DD/MM/YYYY
+    return dmy[3] + '-' + ('0' + p2).slice(-2) + '-' + ('0' + p1).slice(-2);
   }
   return s;
 }
@@ -454,6 +465,25 @@ function getDashboardData(filters, sessionToken) {
       return { name: name, accountName: campMetaMap[name] };
     });
 
+    var minDateTs = Infinity;
+    var maxDateTs = -Infinity;
+    var minDateStr = '';
+    var maxDateStr = '';
+    accountScopedRows.forEach(function (r) {
+      if (r.reportingEndsTs && !isNaN(r.reportingEndsTs)) {
+        if (r.reportingEndsTs < minDateTs) {
+          minDateTs = r.reportingEndsTs;
+          minDateStr = r.reportingEnds;
+        }
+        if (r.reportingEndsTs > maxDateTs) {
+          maxDateTs = r.reportingEndsTs;
+          maxDateStr = r.reportingEnds;
+        }
+      }
+    });
+    var hasAvailableDates = isFinite(minDateTs) && isFinite(maxDateTs);
+    var autoAdjustedRange = null;
+
     let filteredRows = accountScopedRows.filter(function (row) {
       if (targetCampNames.length && targetCampNames.indexOf(row.campaignName) === -1) {
         return false;
@@ -477,6 +507,34 @@ function getDashboardData(filters, sessionToken) {
       }
       return true;
     });
+
+    // Tự động lùi về 7 ngày gần nhất có dữ liệu trong Sheet nếu lần tải ban đầu (isInitialLoad/autoFallback) bị rỗng do chênh lệch ngày
+    if (filteredRows.length === 0 && accountScopedRows.length > 0 && hasAvailableDates && (filters.isInitialLoad || filters.autoFallback)) {
+      var fallbackFromTs = Math.max(minDateTs, maxDateTs - 6 * 86400000);
+      var fallbackFromStr = toDateString(new Date(fallbackFromTs));
+      filteredRows = accountScopedRows.filter(function (row) {
+        if (targetCampNames.length && targetCampNames.indexOf(row.campaignName) === -1) return false;
+        if (filters.search) {
+          var needle = String(filters.search).toLowerCase().trim();
+          var matchCamp = row.campaignName && row.campaignName.toLowerCase().indexOf(needle) !== -1;
+          var matchAccName = row.accountName && row.accountName.toLowerCase().indexOf(needle) !== -1;
+          var matchAccId = row.accountId && row.accountId.toLowerCase().indexOf(needle) !== -1;
+          var matchObj = row.objective && row.objective.toLowerCase().indexOf(needle) !== -1;
+          if (!matchCamp && !matchAccName && !matchAccId && !matchObj) return false;
+        }
+        if (filters.objective && row.objective !== filters.objective) return false;
+        var t = row.reportingEndsTs;
+        if (isNaN(t) || t < fallbackFromTs || t > (maxDateTs + 86399999)) return false;
+        return true;
+      });
+      if (filteredRows.length > 0) {
+        autoAdjustedRange = {
+          from: fallbackFromStr,
+          to: maxDateStr,
+          preset: 'latest7d'
+        };
+      }
+    }
 
     // 2) aggregate to campaigns
     let campaigns = aggregateByCampaign_(filteredRows);
@@ -507,6 +565,13 @@ function getDashboardData(filters, sessionToken) {
       resolved: idx,
       missing: missing,
       sheetName: sheet.getName(),
+      totalRows: authorizedRows.length,
+      accountScopedRowsCount: accountScopedRows.length,
+      availableMinDate: minDateStr,
+      availableMaxDate: maxDateStr,
+      availableMinTs: isFinite(minDateTs) ? minDateTs : null,
+      availableMaxTs: isFinite(maxDateTs) ? maxDateTs : null,
+      autoAdjustedRange: autoAdjustedRange,
       generatedAt: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm'),
       // All campaign names within user's selected accounts — feeds Search Campaign selector
       allCampaignNames: distinctCampaignNames_(accountScopedRows),
@@ -1598,6 +1663,26 @@ function getAdSetData(campaignName, filters, sessionToken) {
       return allowUnknownForSuperAdmin;
     });
 
+    var accountScopedRows = rows.slice();
+    var minDateTs = Infinity;
+    var maxDateTs = -Infinity;
+    var minDateStr = '';
+    var maxDateStr = '';
+    accountScopedRows.forEach(function (r) {
+      if (r.reportingEndsTs && !isNaN(r.reportingEndsTs)) {
+        if (r.reportingEndsTs < minDateTs) {
+          minDateTs = r.reportingEndsTs;
+          minDateStr = r.reportingEnds;
+        }
+        if (r.reportingEndsTs > maxDateTs) {
+          maxDateTs = r.reportingEndsTs;
+          maxDateStr = r.reportingEnds;
+        }
+      }
+    });
+    var hasAvailableDates = isFinite(minDateTs) && isFinite(maxDateTs);
+    var autoAdjustedRange = null;
+
     // distinct campaigns present (for the picker) — before the campaign filter
     var campSet = {};
     rows.forEach(function (r) { if (r._realCampaign) campSet[r._realCampaign] = true; });
@@ -1613,6 +1698,24 @@ function getAdSetData(campaignName, filters, sessionToken) {
         if (filters.dateTo && !isNaN(toTs) && r.reportingEndsTs > toTs) return false;
         return true;
       });
+    }
+
+    // Tự động lùi về khoảng ngày có dữ liệu nếu lần tải ban đầu (isInitialLoad / autoFallback) bị rỗng
+    if (rows.length === 0 && accountScopedRows.length > 0 && hasAvailableDates && (filters.isInitialLoad || filters.autoFallback)) {
+      var fallbackFromTs = Math.max(minDateTs, maxDateTs - 6 * 86400000);
+      var fallbackFromStr = toDateString(new Date(fallbackFromTs));
+      rows = accountScopedRows.filter(function (r) {
+        var t = r.reportingEndsTs;
+        if (isNaN(t) || t < fallbackFromTs || t > (maxDateTs + 86399999)) return false;
+        return true;
+      });
+      if (rows.length > 0) {
+        autoAdjustedRange = {
+          from: fallbackFromStr,
+          to: maxDateStr,
+          preset: 'latest7d'
+        };
+      }
     }
 
     // Optional campaign filter (empty = ALL Ad Sets across selected accounts)
@@ -1667,6 +1770,12 @@ function getAdSetData(campaignName, filters, sessionToken) {
     return {
       accounts: allowedAccounts,
       rows: rows, campaigns: adsets, campaignList: campaignList, adsetList: adsetList, summary: summary,
+      totalRows: accountScopedRows.length,
+      availableMinDate: minDateStr,
+      availableMaxDate: maxDateStr,
+      availableMinTs: isFinite(minDateTs) ? minDateTs : null,
+      availableMaxTs: isFinite(maxDateTs) ? maxDateTs : null,
+      autoAdjustedRange: autoAdjustedRange,
       generatedAt: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm'),
       error: null
     };
@@ -1929,6 +2038,26 @@ function getAdData(filters, sessionToken) {
       return allowUnknownForSuperAdmin;
     });
 
+    var accountScopedRows = rows.slice();
+    var minDateTs = Infinity;
+    var maxDateTs = -Infinity;
+    var minDateStr = '';
+    var maxDateStr = '';
+    accountScopedRows.forEach(function (r) {
+      if (r.reportingEndsTs && !isNaN(r.reportingEndsTs)) {
+        if (r.reportingEndsTs < minDateTs) {
+          minDateTs = r.reportingEndsTs;
+          minDateStr = r.reportingEnds;
+        }
+        if (r.reportingEndsTs > maxDateTs) {
+          maxDateTs = r.reportingEndsTs;
+          maxDateStr = r.reportingEnds;
+        }
+      }
+    });
+    var hasAvailableDates = isFinite(minDateTs) && isFinite(maxDateTs);
+    var autoAdjustedRange = null;
+
     // distinct campaigns present (for the picker) — before any filtering
     var campSetAll = {};
     rows.forEach(function (r) { if (r._realCampaign) campSetAll[r._realCampaign] = true; });
@@ -1944,6 +2073,24 @@ function getAdData(filters, sessionToken) {
         if (filters.dateTo && !isNaN(toTs) && r.reportingEndsTs > toTs) return false;
         return true;
       });
+    }
+
+    // Tự động lùi về khoảng ngày có dữ liệu nếu lần tải ban đầu (isInitialLoad / autoFallback) bị rỗng
+    if (rows.length === 0 && accountScopedRows.length > 0 && hasAvailableDates && (filters.isInitialLoad || filters.autoFallback)) {
+      var fallbackFromTs = Math.max(minDateTs, maxDateTs - 6 * 86400000);
+      var fallbackFromStr = toDateString(new Date(fallbackFromTs));
+      rows = accountScopedRows.filter(function (r) {
+        var t = r.reportingEndsTs;
+        if (isNaN(t) || t < fallbackFromTs || t > (maxDateTs + 86399999)) return false;
+        return true;
+      });
+      if (rows.length > 0) {
+        autoAdjustedRange = {
+          from: fallbackFromStr,
+          to: maxDateStr,
+          preset: 'latest7d'
+        };
+      }
     }
     // campaign filter (optional) — narrows BEFORE computing the ad-set list, so that
     // dropdown scopes itself to whatever campaign(s) are currently chosen
@@ -2062,6 +2209,12 @@ function getAdData(filters, sessionToken) {
       accounts: allowedAccounts,
       ads: ads, campaignList: campaignList, adsetList: adsetList, adsetMeta: adsetMeta, adNameList: adNameList, summary: summary,
       creativeTypeCounts: creativeTypeCounts,
+      totalRows: accountScopedRows.length,
+      availableMinDate: minDateStr,
+      availableMaxDate: maxDateStr,
+      availableMinTs: isFinite(minDateTs) ? minDateTs : null,
+      availableMaxTs: isFinite(maxDateTs) ? maxDateTs : null,
+      autoAdjustedRange: autoAdjustedRange,
       generatedAt: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm'),
       error: null
     };
