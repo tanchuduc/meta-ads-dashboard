@@ -333,24 +333,52 @@ var CAMPAIGN_INSIGHTS_INITIAL_CHUNK_DAYS_ = 14;   // used only by sync fallback
 var CAMPAIGN_INSIGHTS_LIMIT_STEPS_ = [200, 100, 50, 25];
 
 /**
- * Kéo dữ liệu Campaign 30 ngày gần nhất (đến hôm qua) cho cả 9 tài khoản.
- * Dùng Meta Async Insights Report + checkpoint + trigger tự nối ca để không bao giờ timeout 1504044 hay 6 phút.
+ * Kéo dữ liệu 30 ngày gần nhất (đến hôm qua) cho cả 9 tài khoản trên TOÀN BỘ 3 TẦNG:
+ * 1. Campaign (Ghi vào Sheet 1: Meta Ads - Campaign Data)
+ * 2. AdSet (Ghi vào Sheet 2: Meta Ads - AdSet Data)
+ * 3. Ad & Creative (Ghi vào Sheet 3: Meta Ads - Ad & Creative Data)
+ * Dùng Meta Async Insights Report + checkpoint + trigger tự nối ca để không bao giờ timeout.
  */
 function backfillLast30Days() {
   var until = getYesterday();
   var since = getDateNDaysAgo_(30);
+  if (typeof runAsyncBackfillJob_ === 'function') {
+    return runAsyncBackfillJob_({
+      pipelines: ['campaign', 'adset', 'ad'],
+      since: since,
+      until: until,
+      autoResume: true
+    });
+  }
   return backfillDateRange(since, until, { chunkDays: 15, autoResume: true });
 }
 
 /**
- * Kéo dữ liệu Campaign 90 ngày gần nhất (đến hôm qua) cho cả 9 tài khoản.
- * Dùng Meta Async Insights Report (cửa sổ 15 ngày, mới nhất trước) + checkpoint + trigger tự nối ca.
- * Chỉ cần bấm Chạy 1 lần — nếu vượt 4 phút, hệ thống tự hẹn trigger chạy tiếp sau 1 phút cho đến khi đủ 9/9 tài khoản.
+ * Kéo dữ liệu 90 ngày gần nhất (đến hôm qua) cho cả 9 tài khoản trên TOÀN BỘ 3 TẦNG:
+ * 1. Campaign (Sheet 1) -> 2. AdSet (Sheet 2) -> 3. Ad & Creative (Sheet 3)
  */
 function backfillLast90Days() {
   var until = getYesterday();
   var since = getDateNDaysAgo_(90);
+  if (typeof runAsyncBackfillJob_ === 'function') {
+    return runAsyncBackfillJob_({
+      pipelines: ['campaign', 'adset', 'ad'],
+      since: since,
+      until: until,
+      autoResume: true
+    });
+  }
   return backfillDateRange(since, until, { chunkDays: 15, autoResume: true });
+}
+
+function backfillAllPipelinesLast30Days() { return backfillLast30Days(); }
+function backfillAllPipelinesLast90Days() { return backfillLast90Days(); }
+
+function backfillCampaignLast30Days() {
+  return backfillDateRange(getDateNDaysAgo_(30), getYesterday(), { chunkDays: 15, autoResume: true });
+}
+function backfillCampaignLast90Days() {
+  return backfillDateRange(getDateNDaysAgo_(90), getYesterday(), { chunkDays: 15, autoResume: true });
 }
 
 function nextSmallerCampaignLimit_(currentLimit) {

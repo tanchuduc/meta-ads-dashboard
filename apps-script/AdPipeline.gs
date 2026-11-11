@@ -236,7 +236,24 @@ function backfillAdHistory() {
 function backfillAdData(sinceStr, untilStr) {
   var sheet = getAdSheet_();
   ensureAdHeaders_(sheet);
+  if (typeof runAsyncBackfillJob_ === 'function') {
+    return runAsyncBackfillJob_({
+      pipeline: 'ad',
+      since: sinceStr,
+      until: untilStr,
+      chunkDays: 3,
+      autoResume: true
+    });
+  }
   backfillAdRange_(sheet, sinceStr, untilStr, Date.now() + AD_BACKFILL_TIME_BUDGET_MS_);
+}
+
+function backfillAdLast30Days() {
+  return backfillAdData(getDateNDaysAgo_(30), getYesterday());
+}
+
+function backfillAdLast90Days() {
+  return backfillAdData(getDateNDaysAgo_(90), getYesterday());
 }
 
 function backfillAdRange_(sheet, sinceStr, untilStr, deadlineMs) {
@@ -681,14 +698,19 @@ function removeAdRowsInRange_(sheet, sinceStr, untilStr, accountIdSet) {
   if (last < 2) return;
   var lastCol = sheet.getLastColumn();
   var vals = sheet.getRange(2, 1, last - 1, lastCol).getValues();
-  var s = new Date(sinceStr).getTime();
-  var u = new Date(untilStr).getTime() + 86399999;
+  var useIsoRange = /^\d{4}-\d{2}-\d{2}$/.test(sinceStr) && /^\d{4}-\d{2}-\d{2}$/.test(untilStr);
+  var s = useIsoRange ? 0 : new Date(sinceStr).getTime();
+  var u = useIsoRange ? 0 : (new Date(untilStr).getTime() + 86399999);
   var kept = vals.filter(function (r) {
     if (accountIdSet) {
       var rowAccId = String(r[0] || '').trim();
       if (!accountIdSet[rowAccId]) return true;
     }
-    var ts = new Date(dayKey_(r[9])).getTime();
+    var k = dayKey_(r[9]);
+    if (useIsoRange && /^\d{4}-\d{2}-\d{2}$/.test(k)) {
+      return !(k >= sinceStr && k <= untilStr);
+    }
+    var ts = new Date(k).getTime();
     if (isNaN(ts)) return true;
     return !(ts >= s && ts <= u);
   });

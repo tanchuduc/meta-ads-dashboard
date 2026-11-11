@@ -1122,3 +1122,61 @@ function adminRunSyncNow(sessionToken) {
   }
 }
 
+/**
+ * Super Admin API: Bắt đầu chạy tiến trình Backfill 3 tầng (Campaign -> AdSet -> Ad)
+ */
+function adminStartBackfill(sessionToken, days) {
+  var auth = requireSuperAdmin_(sessionToken);
+  if (!auth.ok) {
+    return { ok: false, authError: !!auth.authError, forbidden: !!auth.forbidden, error: auth.error };
+  }
+  var numDays = parseInt(days, 10) || 30;
+  var until = getYesterday();
+  var since = getDateNDaysAgo_(numDays);
+  if (typeof runAsyncBackfillJob_ !== 'function') {
+    return { ok: false, error: 'Hàm runAsyncBackfillJob_ chưa được nạp.' };
+  }
+  var res = runAsyncBackfillJob_({
+    pipelines: ['campaign', 'adset', 'ad'],
+    since: since,
+    until: until,
+    autoResume: true
+  });
+  return {
+    ok: true,
+    message: 'Đã kích hoạt Backfill 3 tầng (' + numDays + ' ngày qua từ ' + since + ' đến ' + until + '). Tiến trình sẽ tự động nối ca qua trigger ngầm.',
+    details: res
+  };
+}
+
+/**
+ * Super Admin API: Kiểm tra tiến độ Backfill hiện tại
+ */
+function adminGetBackfillStatus(sessionToken) {
+  var auth = requireSuperAdmin_(sessionToken);
+  if (!auth.ok) {
+    return { ok: false, authError: !!auth.authError, forbidden: !!auth.forbidden, error: auth.error };
+  }
+  if (typeof getAsyncBackfillStatus !== 'function') {
+    return { ok: false, error: 'Hàm getAsyncBackfillStatus chưa sẵn sàng.' };
+  }
+  var st = getAsyncBackfillStatus();
+  return { ok: true, status: st };
+}
+
+/**
+ * Super Admin API: Dừng chủ động tiến trình Backfill
+ */
+function adminCancelBackfill(sessionToken) {
+  var auth = requireSuperAdmin_(sessionToken);
+  if (!auth.ok) {
+    return { ok: false, authError: !!auth.authError, forbidden: !!auth.forbidden, error: auth.error };
+  }
+  if (typeof cancelAsyncBackfillJob !== 'function') {
+    return { ok: false, error: 'Hàm cancelAsyncBackfillJob chưa sẵn sàng.' };
+  }
+  cancelAsyncBackfillJob();
+  return { ok: true, message: 'Đã hủy job Backfill và dọn sạch toàn bộ trigger nối ca.' };
+}
+
+

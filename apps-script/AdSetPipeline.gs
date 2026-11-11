@@ -268,6 +268,14 @@ function backfillAdSetData(sinceStr, untilStr, opts) {
   Logger.log('backfillAdSetData ' + sinceStr + '..' + untilStr + ': ' + result.rows.length + ' rows');
 }
 
+function backfillAdSetLast30Days() {
+  return backfillAdSetData(getDateNDaysAgo_(30), getYesterday());
+}
+
+function backfillAdSetLast90Days() {
+  return backfillAdSetData(getDateNDaysAgo_(90), getYesterday());
+}
+
 // ── ONE-OFF: closes the Aug 12 -> yesterday gap in "data - adset - by day" caused by
 // the silent-failure bug fixed above. Safe to re-run (idempotent per range) — if it
 // doesn't fully close the gap on the first try (the underlying Meta API issue may still

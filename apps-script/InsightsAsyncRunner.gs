@@ -247,6 +247,40 @@ function getBackfillPipelineAdapter_(pipeline, breakdownType) {
     };
   }
 
+  if (pipeline === 'ad') {
+    return {
+      defaultChunkDays: 3,
+      getSheet: function () {
+        var sheet = getAdSheet_();
+        ensureAdHeaders_(sheet);
+        return sheet;
+      },
+      buildParams: function (sinceStr, untilStr) {
+        return {
+          level: 'ad',
+          time_increment: '1',
+          include_archived: 'true',
+          fields: 'ad_id,ad_name,adset_name,' + INSIGHT_FIELDS_,
+          time_range: JSON.stringify({ since: sinceStr, until: untilStr })
+        };
+      },
+      getSettings: function (accId, cache) {
+        if (!cache[accId]) cache[accId] = fetchCampaignSettings(accId);
+        return cache[accId];
+      },
+      buildRow: function (item, settings, acc) {
+        return buildAdRow_(item, settings, acc);
+      },
+      removeRange: function (sheet, sinceStr, untilStr, accountIdSet) {
+        removeAdRowsInRange_(sheet, sinceStr, untilStr, accountIdSet);
+      },
+      appendRows: function (sheet, rows) {
+        appendAdRowsSafe_(sheet, rows);
+      },
+      freshnessKey: 'ads'
+    };
+  }
+
   throw new Error('Unsupported async backfill pipeline: ' + pipeline);
 }
 
@@ -532,7 +566,10 @@ function runAsyncBackfillJob_(jobConfig) {
   try {
     cleanupAsyncBackfillTriggers_();
 
-    var pipeline = jobConfig.pipeline || 'campaign';
+    var pipelines = (jobConfig.pipelines && jobConfig.pipelines.length)
+      ? jobConfig.pipelines
+      : [jobConfig.pipeline || 'campaign'];
+    var pipeline = pipelines[0];
     var adapter = getBackfillPipelineAdapter_(pipeline, jobConfig.breakdownTypes ? jobConfig.breakdownTypes[0] : null);
     var sinceStr = jobConfig.since;
     var untilStr = jobConfig.until;
@@ -548,8 +585,20 @@ function runAsyncBackfillJob_(jobConfig) {
       return { ok: true, completed: true, rowsWritten: 0 };
     }
 
+    var totalAccountSteps = 0;
+    for (var pi = 0; pi < pipelines.length; pi++) {
+      var pName = pipelines[pi];
+      var pAdapter = getBackfillPipelineAdapter_(pName, null);
+      var pChunk = (pi === 0 && jobConfig.chunkDays) ? jobConfig.chunkDays : pAdapter.defaultChunkDays;
+      var pWins = asyncBuildReversedChunks_(sinceStr, untilStr, pChunk);
+      var pBreakdowns = (pName === 'breakdown') ? ((jobConfig.breakdownTypes && jobConfig.breakdownTypes.length) || 5) : 1;
+      totalAccountSteps += pWins.length * accounts.length * pBreakdowns;
+    }
+
     var state = {
-      jobId: pipeline + '_' + Date.now(),
+      jobId: 'backfill_' + Date.now(),
+      pipelines: pipelines,
+      pIdx: 0,
       pipeline: pipeline,
       since: sinceStr,
       until: untilStr,
@@ -564,7 +613,7 @@ function runAsyncBackfillJob_(jobConfig) {
       activeRunId: null,
       activeRunCreatedAt: 0,
       completedAccountsSteps: 0,
-      totalAccountSteps: breakdownTypes.length * windows.length * accounts.length,
+      totalAccountSteps: totalAccountSteps,
       rowsWritten: 0,
       failedTasks: [],
       createdAt: Date.now(),
@@ -572,9 +621,8 @@ function runAsyncBackfillJob_(jobConfig) {
     };
 
     PropertiesService.getScriptProperties().setProperty(ASYNC_BACKFILL_STATE_PROP_, JSON.stringify(state));
-    Logger.log('🚀 Bắt đầu Async Backfill [' + pipeline + '] ' + sinceStr + '..' + untilStr +
-      ' (' + windows.length + ' cửa sổ × ' + accounts.length + ' tài khoản' +
-      (breakdownTypes.length > 1 ? ' × ' + breakdownTypes.length + ' breakdowns' : '') + ').');
+    Logger.log('🚀 Bắt đầu Async Backfill [' + pipelines.join(' → ') + '] ' + sinceStr + '..' + untilStr +
+      ' (tổng ' + totalAccountSteps + ' bước trên ' + accounts.length + ' tài khoản).');
 
     return executeAsyncBackfillBatch_(state, jobConfig.deadlineMs || (Date.now() + ASYNC_BACKFILL_SOFT_BUDGET_MS_));
   } finally {
@@ -836,7 +884,35 @@ function executeAsyncBackfillBatch_(state, deadlineMs) {
     flushNow();
   }
 
-  var allDone = (state.bIdx >= state.breakdownTypes.length) || (state.wIdx >= state.windows.length);
+  var currentPipelineDone = (state.bIdx >= state.breakdownTypes.length) || (state.wIdx >= state.windows.length);
+  if (currentPipelineDone) {
+    if (state.pipelines && (state.pIdx + 1) < state.pipelines.length) {
+      state.pIdx++;
+      state.pipeline = state.pipelines[state.pIdx];
+      var nextAdapter = getBackfillPipelineAdapter_(state.pipeline, null);
+      var nextChunk = nextAdapter.defaultChunkDays;
+      state.windows = asyncBuildReversedChunks_(state.since, state.until, nextChunk);
+      state.breakdownTypes = (state.pipeline === 'breakdown')
+        ? (state.breakdownTypes || ['age', 'gender', 'platform', 'placement', 'region'])
+        : [null];
+      state.bIdx = 0;
+      state.wIdx = 0;
+      state.aIdx = 0;
+      state.subQueue = state.windows.length ? [{ s: state.windows[0].s, u: state.windows[0].u }] : [];
+      state.activeRunId = null;
+      state.activeRunCreatedAt = 0;
+      state.updatedAt = Date.now();
+      Logger.log('➡️ Hoàn tất tầng trước! Tiếp tục chuyển sang tầng [' + state.pipeline + '] ' + state.since + '..' + state.until +
+        ' (' + (state.pIdx + 1) + '/' + state.pipelines.length + ' tầng).');
+
+      // Nếu còn nhiều hơn 45 giây trước soft deadline, tiếp tục ca hiện tại
+      if (Date.now() + 45000 < deadlineMs) {
+        return executeAsyncBackfillBatch_(state, deadlineMs);
+      }
+    }
+  }
+
+  var allDone = currentPipelineDone && (!state.pipelines || (state.pIdx + 1) >= state.pipelines.length);
   if (allDone) {
     props.deleteProperty(ASYNC_BACKFILL_STATE_PROP_);
     cleanupAsyncBackfillTriggers_();
@@ -846,7 +922,8 @@ function executeAsyncBackfillBatch_(state, deadlineMs) {
     var failNote = (state.failedTasks && state.failedTasks.length)
       ? ' | ⚠️ ' + state.failedTasks.length + ' tác vụ lỗi (dữ liệu cũ của các tài khoản đó được giữ nguyên): ' + JSON.stringify(state.failedTasks)
       : ' | 0 lỗi.';
-    Logger.log('🎉 HOÀN TẤT Async Backfill [' + state.pipeline + '] ' + state.since + '..' + state.until +
+    var summaryName = state.pipelines ? state.pipelines.join(' → ') : state.pipeline;
+    Logger.log('🎉 HOÀN TẤT Async Backfill [' + summaryName + '] ' + state.since + '..' + state.until +
       ': đã ghi tổng ' + state.rowsWritten + ' dòng (' + state.completedAccountsSteps + '/' +
       state.totalAccountSteps + ' lượt tài khoản-cửa sổ)' + failNote);
     return {
@@ -862,7 +939,10 @@ function executeAsyncBackfillBatch_(state, deadlineMs) {
 
   var delayMs = rateLimitedPause ? ASYNC_BACKFILL_RATE_LIMIT_DELAY_MS_ : ASYNC_BACKFILL_RESUME_DELAY_MS_;
   var sched = state.autoResume ? scheduleAsyncBackfillTrigger_(delayMs) : { ok: false };
-  Logger.log('⏳ Tạm dừng ca Async Backfill [' + state.pipeline + '] ở mốc ' +
+  var currentLabel = state.pipelines
+    ? (state.pipeline + ' [' + (state.pIdx + 1) + '/' + state.pipelines.length + ' tầng]')
+    : state.pipeline;
+  Logger.log('⏳ Tạm dừng ca Async Backfill [' + currentLabel + '] ở mốc ' +
     state.completedAccountsSteps + '/' + state.totalAccountSteps + ' (đã ghi ' + state.rowsWritten + ' dòng). ' +
     (sched.ok
       ? ('Đã hẹn trigger tự chạy tiếp sau ' + Math.round(delayMs / 60000) + ' phút — bạn có thể đóng trình duyệt.')
@@ -894,11 +974,21 @@ function getAsyncBackfillStatus() {
   var raw = PropertiesService.getScriptProperties().getProperty(ASYNC_BACKFILL_STATE_PROP_);
   if (!raw) {
     Logger.log('Không có Async Backfill job nào đang chạy hoặc chờ.');
-    return null;
+    return { isRunning: false, message: 'Không có tiến trình Backfill nào đang chạy.' };
   }
   var st = JSON.parse(raw);
-  Logger.log('📊 Async Backfill [' + st.pipeline + '] ' + st.since + '..' + st.until + ': ' +
-    st.completedAccountsSteps + '/' + st.totalAccountSteps + ' lượt | đã ghi ' + st.rowsWritten +
+  var pName = st.pipeline || 'unknown';
+  if (st.pipelines && st.pipelines.length > 1) {
+    pName = st.pipeline + ' (' + (st.pIdx + 1) + '/' + st.pipelines.length + ' tầng: ' + st.pipelines.join(' → ') + ')';
+  }
+  var percent = st.totalAccountSteps > 0 ? Math.round((st.completedAccountsSteps / st.totalAccountSteps) * 100) : 0;
+  Logger.log('📊 Async Backfill [' + pName + '] ' + st.since + '..' + st.until + ': ' +
+    st.completedAccountsSteps + '/' + st.totalAccountSteps + ' bước (' + percent + '%) | đã ghi ' + st.rowsWritten +
     ' dòng | activeRunId=' + (st.activeRunId || 'none'));
+  st.isRunning = true;
+  st.percent = percent;
+  st.currentPipeline = st.pipeline;
+  st.currentPipelineIndex = st.pIdx || 0;
+  st.totalPipelines = (st.pipelines && st.pipelines.length) || 1;
   return st;
 }

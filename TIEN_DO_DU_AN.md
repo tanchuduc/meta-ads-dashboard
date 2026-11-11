@@ -1,7 +1,7 @@
 # BÁO CÁO TIẾN ĐỘ DỰ ÁN & BỐI CẢNH HIỆN TẠI (PROJECT STATUS)
 > **Dự án**: Meta Ads Dashboard (Hệ thống Báo cáo & Dashboard Tự động Meta Ads)  
-> **Cập nhật lần cuối**: 11/11/2026 (09:32 GMT+7)  
-> **Deployment GAS hiện tại**: `@16` (`AKfycbwiUrrO-wOlSQ8V-_6curECLrd7-n339lcJLhAwK6AUfQwzvxWeDgNYj4Xaq765-9uZ`)  
+> **Cập nhật lần cuối**: 11/11/2026 (10:05 GMT+7)  
+> **Deployment GAS hiện tại**: `@23` (`AKfycbwiUrrO-wOlSQ8V-_6curECLrd7-n339lcJLhAwK6AUfQwzvxWeDgNYj4Xaq765-9uZ`)  
 > **Mục đích tài liệu**: Tóm tắt toàn bộ bối cảnh, kiến trúc kỹ thuật, tiến độ đã hoàn thành, trạng thái cấu hình `clasp`/deploy và các bước tiếp theo để khi mở dự án trên bất kỳ máy nào (nhà hoặc công ty), AI Agent (Antigravity) và lập trình viên có thể nắm bắt và tiếp tục công việc ngay lập tức.
 
 ---
@@ -218,6 +218,20 @@ Tất cả cấu hình chính được khai báo trong [`apps-script/Config.gs`]
   - Huy hiệu trạng thái bộ nhớ đệm trên header: `#cacheStatusPill` hiển thị `⚡ 0.01s (RAM)`.
   - Nút `Làm mới` cho phép người dùng chủ động nạp đè dữ liệu mới nhất từ Google Sheets bất kỳ lúc nào.
 - [x] **Đã deploy thành công lên Google Apps Script `@16`**.
+
+### I. Nâng Cấp Toàn Diện Engine Backfill 3 Tầng Dữ Liệu Tự Động Nối Ca (Deploy `@23`)
+- [x] **Mở rộng Async Runner hỗ trợ đồng bộ cả 3 tầng (Campaign → AdSet → Ad)**:
+  - Bổ sung adapter cho tầng `ad` vào [`apps-script/InsightsAsyncRunner.gs`](apps-script/InsightsAsyncRunner.gs), sử dụng cấu hình an toàn `chunkDays: 3` và trường `ad_id,ad_name,adset_name,...` tránh lỗi overload của Meta.
+  - Hỗ trợ mảng chuỗi `pipelines: ['campaign', 'adset', 'ad']` trong `runAsyncBackfillJob_()` và tự động chuyển giao tầng tuần tự khi hoàn tất mà không dừng giữa chừng.
+  - Chuẩn hóa hàm lọc xóa theo ngày `removeAdRowsInRange_()` bằng regex ISO Date `YYYY-MM-DD` chống lệch múi giờ.
+- [x] **Tích hợp các hàm Backfill gộp và nút điều khiển trực quan trên giao diện Web App**:
+  - `backfillLast30Days()` & `backfillLast90Days()` tự động kéo trọn vẹn cả 3 Google Sheets (Campaign, AdSet, Ad) cho cả 9 tài khoản quảng cáo.
+  - Bổ sung các API quản trị: `adminStartBackfill(sessionToken, days)`, `adminGetBackfillStatus(sessionToken)`, `adminCancelBackfill(sessionToken)`.
+  - Bổ sung 3 nút bấm tiện ích trong tab **Quản Trị Người Dùng** trên Dashboard:
+    - `Backfill 30 Ngày (3 Tầng)`
+    - `Backfill 90 Ngày (3 Tầng)`
+    - `Tiến độ Backfill` (xem trực tiếp % hoàn thành và số dòng đã ghi mà không cần mở Apps Script Editor).
+- [x] **Đã deploy thành công lên Google Apps Script `@23`**.
 
 ---
 

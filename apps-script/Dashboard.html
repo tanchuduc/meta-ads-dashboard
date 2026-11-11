@@ -5459,9 +5459,12 @@ thead th.col-campaignName {
 <section id="adminUsersView" style="display:none">
   <div class="section-bar">
     <h2><i class="fas fa-users-gear" aria-hidden="true"></i> Quản Trị Người Dùng &amp; Phân Quyền TKQC</h2>
-    <div class="section-actions" style="display:flex;align-items:center;gap:8px">
+    <div class="section-actions" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <button type="button" class="ghost-btn" id="btnAdminRunSyncNow" onclick="adminTriggerImmediateSync()"><i class="fas fa-bolt" style="color:#F59E0B" aria-hidden="true"></i> Đồng bộ Meta Ads Ngay</button>
-      <button type="button" class="ghost-btn" id="btnAdminSetupTriggers" onclick="adminTriggerDailySetup()"><i class="fas fa-clock" aria-hidden="true"></i> Cài đặt 5 Trigger Tự Động Ban Đêm</button>
+      <button type="button" class="ghost-btn" id="btnAdminSetupTriggers" onclick="adminTriggerDailySetup()"><i class="fas fa-clock" aria-hidden="true"></i> Cài đặt 5 Trigger Chạy Đêm</button>
+      <button type="button" class="ghost-btn" id="btnAdminBackfill30" onclick="adminTriggerBackfill(30)"><i class="fas fa-database" style="color:#3B82F6" aria-hidden="true"></i> Backfill 30 Ngày (3 Tầng)</button>
+      <button type="button" class="ghost-btn" id="btnAdminBackfill90" onclick="adminTriggerBackfill(90)"><i class="fas fa-cloud-arrow-down" style="color:#8B5CF6" aria-hidden="true"></i> Backfill 90 Ngày (3 Tầng)</button>
+      <button type="button" class="ghost-btn" id="btnAdminBackfillStatus" onclick="adminCheckBackfillStatus()"><i class="fas fa-chart-line" aria-hidden="true"></i> Tiến độ Backfill</button>
       <button type="button" class="ghost-btn" onclick="loadAdminUsers()"><i class="fas fa-rotate" aria-hidden="true"></i> Tải lại danh sách</button>
     </div>
   </div>
@@ -12828,6 +12831,89 @@ function adminTriggerDailySetup() {
     if (btn) {
       btn.disabled = false;
       btn.innerHTML = '<i class="fas fa-clock"></i> Cài đặt 5 Trigger Tự Động Ban Đêm';
+    }
+    showToast('Lỗi kết nối: ' + ((err && err.message) || String(err)));
+  });
+}
+
+function adminTriggerBackfill(days) {
+  if (!isAuthenticated_()) return;
+  var btnId = days === 90 ? 'btnAdminBackfill90' : 'btnAdminBackfill30';
+  var btn = document.getElementById(btnId);
+  var originalHtml = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang khởi động…';
+  }
+  if (isDemo()) {
+    setTimeout(function() {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+      }
+      showToast('Đã mô phỏng kích hoạt Backfill ' + days + ' ngày (Chế độ Demo).');
+    }, 500);
+    return;
+  }
+  gasRun_('adminStartBackfill', [getSessionToken_(), days], function(res) {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+    }
+    if (res && res.ok) {
+      showToast(res.message || 'Đã bắt đầu tiến trình Backfill ' + days + ' ngày cho 3 tầng!');
+      setTimeout(adminCheckBackfillStatus, 1500);
+    } else {
+      showToast('Lỗi: ' + ((res && res.error) || 'Không thể bắt đầu Backfill.'));
+    }
+  }, function(err) {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+    }
+    showToast('Lỗi kết nối: ' + ((err && err.message) || String(err)));
+  });
+}
+
+function adminCheckBackfillStatus() {
+  if (!isAuthenticated_()) return;
+  var btn = document.getElementById('btnAdminBackfillStatus');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang kiểm tra…';
+  }
+  if (isDemo()) {
+    setTimeout(function() {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-chart-line"></i> Tiến độ Backfill';
+      }
+      showToast('Tiến độ Backfill (Demo): Không có job ngầm nào đang chạy.');
+    }, 400);
+    return;
+  }
+  gasRun_('adminGetBackfillStatus', [getSessionToken_()], function(res) {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fas fa-chart-line"></i> Tiến độ Backfill';
+    }
+    if (res && res.ok && res.status) {
+      var st = res.status;
+      if (!st.isRunning) {
+        showToast('Hiện tại không có job Backfill nào đang chạy.');
+        return;
+      }
+      var pMsg = '📊 Tiến độ Backfill [' + (st.currentPipeline || st.pipeline || '') + ']: ' +
+        st.completedAccountsSteps + '/' + st.totalAccountSteps + ' bước (' + (st.percent || 0) + '%), đã ghi ' +
+        (st.rowsWritten || 0) + ' dòng.';
+      showToast(pMsg);
+    } else {
+      showToast('Lỗi: ' + ((res && res.error) || 'Không thể lấy trạng thái.'));
+    }
+  }, function(err) {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fas fa-chart-line"></i> Tiến độ Backfill';
     }
     showToast('Lỗi kết nối: ' + ((err && err.message) || String(err)));
   });
